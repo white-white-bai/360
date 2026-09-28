@@ -7,12 +7,10 @@ misconception is stated by each check's `diagnoses`, and keeping a second copy
 would let the two disagree. `npm run validate` derives reachability from the
 checks and fails if an entry below cannot be diagnosed (ADR 0009).
 
-REMOVED — "UTC 和 GMT 是同一个东西" (previously M-utc-is-gmt). It was cut because
-no corpus passage supported the claim and no check could diagnose it, which made
-it exactly the entry ADR 0009 warns about. It can come back the moment a sourced
-passage and a diagnosing check exist for it; it should not be re-added just
-because the misconception is real, because being true is not the same as being
-grounded in this Domain's corpus.
+RETURNED — "UTC 和 GMT 是同一个东西" (M-utc-is-gmt). It was removed when no
+passage supported it and no check could diagnose it. Checking RFC 9557 turned up
+both: §1.2 says UTC is "often mistakenly referred to as GMT", and checks.md now
+has C-utc-gmt. Grounding existed; it just had not been read yet.
 -->
 
 # Misconceptions — time stamps, time zones and daylight saving
@@ -34,3 +32,15 @@ refutation: 夏令时切换会让一段本地墙上时间不存在（春季前�
 name: 时间戳本身带着时区
 wrongModel: 认为拿到一个时间戳就等于知道它对应哪个时区，于是直接把它渲染成本地时间。
 refutation: 一个瞬时点（例如 Unix 秒）只确定时间轴上的一个点，不携带任何时区。要把它渲染成本地墙上时间，必须另外提供时区规则；RFC 3339 字符串携带的是偏移量，也不是时区标识。
+
+## M-utc-is-gmt
+
+name: UTC 和 GMT 是同一个东西
+wrongModel: 把两个名字当成同一件事，于是认为在任何场合互换都不会出错。
+refutation: GMT 是一个更早的时间标度，UTC 是它的后继。民用场合两者读数通常一致，所以这个错误不容易暴露；但它们不是同一个标度，涉及闰秒与法规文本时不能互换。
+
+## M-z-equals-plus-zero
+
+name: Z 和 +00:00 是同一件事
+wrongModel: 认为字符串末尾写 Z 还是写 +00:00 完全等价，只是写法不同。
+refutation: RFC 9557 更新了这一处：Z 表示"UTC 时刻已知，但本地偏移量未知"，等同于旧的 -00:00；而 +00:00 仍然表示"UTC 是首选的参考点"。两者语义不同。

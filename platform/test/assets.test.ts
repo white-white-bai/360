@@ -79,10 +79,12 @@ test("the glossary pins renderings and separates identifiers", () => {
   }
 });
 
-test("the domain owner is still a placeholder, and that is recorded rather than hidden", () => {
-  // ADR 0006 requires a named person. Until one is assigned this asset is not
-  // usable for the acceptance experiment, so the test asserts the placeholder
-  // explicitly — it will fail the day someone assigns a real name, which is the
-  // reminder to replace this assertion with a real one.
-  assert.equal(domain.owner, "REPLACE_WITH_A_NAMED_PERSON");
+test("the domain has a named owner, as ADR 0006 requires", () => {
+  // This assertion used to pin the placeholder on purpose, so that assigning a
+  // real owner would break it and force this replacement. It did.
+  assert.ok(domain.owner.trim().length > 0, "owner must not be empty");
+  assert.ok(
+    !/REPLACE|TODO|TBD|UNASSIGNED|CHANGEME/i.test(domain.owner),
+    `owner is still a placeholder: ${JSON.stringify(domain.owner)}`,
+  );
 });

@@ -9,6 +9,9 @@ recall, not understanding.
 `expected` is compared after the narrow normalisation documented in
 src/checks/grade.ts. `diagnoses` entries are `<phrase> => <misconception-id>`,
 and the first matching entry wins.
+
+Every misconception in misconceptions.md must be reachable from here:
+`npm run validate` fails on an entry no check can diagnose (ADR 0009).
 -->
 
 # Checks — time stamps, time zones and daylight saving
@@ -34,3 +37,25 @@ grounding:
 diagnoses:
   - 可以，-05:00 就是那个时区 => M-zone-is-an-offset
   - 可以，它带着时区 => M-timestamp-carries-a-zone
+
+## C-utc-gmt
+
+prompt: 有人在代码注释里把 UTC 和 GMT 换着写，并说"反正这两个是一回事"。这个说法在民用场景下为什么很少出事，又在什么情况下会真的出问题？
+expected: 民用场合两者读数通常一致，所以很少暴露；但它们不是同一个标度，GMT 更早、UTC 是它的后继，涉及闰秒与法规文本时不能互换
+grounding:
+  - P-utc-is-not-gmt
+diagnoses:
+  - 本来就是一回事 => M-utc-is-gmt
+  - 两者是同一个东西 => M-utc-is-gmt
+  - 只是叫法不同 => M-utc-is-gmt
+
+## C-z-vs-plus-zero
+
+prompt: 下面两个字符串表示的时刻相同，含义也相同吗？"2026-03-08T02:30:00Z" 与 "2026-03-08T02:30:00+00:00"
+expected: 时刻相同，含义不同：Z 表示本地偏移量未知，+00:00 表示 UTC 是首选参考点
+grounding:
+  - P-z-was-reinterpreted
+diagnoses:
+  - 完全相同 => M-z-equals-plus-zero
+  - 只是写法不同 => M-z-equals-plus-zero
+  - 等价 => M-z-equals-plus-zero

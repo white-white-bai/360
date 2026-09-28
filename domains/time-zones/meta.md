@@ -1,7 +1,7 @@
 ---
 id: time-zones
 name: 时间戳、时区与夏令时
-owner: REPLACE_WITH_A_NAMED_PERSON
+owner: 白杨
 deliveryLanguage: zh
 sources:
   - RFC 3339 — https://www.rfc-editor.org/rfc/rfc3339
