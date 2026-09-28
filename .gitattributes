@@ -1,0 +1,7 @@
+# Normalise line endings across platforms.
+#
+# Without this, a Windows working copy rewrites every file's endings on each
+# checkout, and the resulting diff noise buries the real changes. Pinning LF
+# also means the assets — which are the part of this repo a human reviews line
+# by line — read identically on every machine.
+* text=auto eol=lf

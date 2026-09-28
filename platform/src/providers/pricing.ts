@@ -1,0 +1,36 @@
+export interface ModelPrice {
+  /** USD per million input tokens. */
+  inputPerMTok: number;
+  /** USD per million output tokens. */
+  outputPerMTok: number;
+}
+
+/**
+ * PLACEHOLDER PRICES.
+ *
+ * These exist so the estimate can print a dollar figure instead of a bare token
+ * count. They are NOT a quotation: they were not verified against any vendor's
+ * current pricing, and they must be replaced with the prices of the model you
+ * actually run before the number is used to decide anything.
+ */
+export const FALLBACK_PRICE: ModelPrice = {
+  inputPerMTok: 3,
+  outputPerMTok: 15,
+};
+
+export const PRICES: Record<string, ModelPrice> = {
+  mid: FALLBACK_PRICE,
+  cheap: { inputPerMTok: 0.5, outputPerMTok: 2 },
+};
+
+export function priceFor(model: string): ModelPrice {
+  return PRICES[model] ?? FALLBACK_PRICE;
+}
+
+export function costOf(model: string, inputTokens: number, outputTokens: number): number {
+  const price = priceFor(model);
+  return (
+    (inputTokens / 1_000_000) * price.inputPerMTok +
+    (outputTokens / 1_000_000) * price.outputPerMTok
+  );
+}

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Investigate"
+  short_description: "Root-cause debugging, no fix without the cause"
