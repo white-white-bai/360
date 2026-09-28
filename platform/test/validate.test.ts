@@ -15,12 +15,39 @@ import type { Finding } from "../src/validate/types.ts";
  * anywhere. The point is that each rule fires for its own reason and stays quiet
  * otherwise, which is also what keeps the rules from overlapping into noise.
  */
-function tmpRoot(t: { after: (fn: () => void) => void }): string {
+
+function persona(id: string): string {
+  return `---\nid: ${id}\nname: ${id}\nstance: s\nregister: r\n---\n`;
+}
+
+function style(id: string): string {
+  return [
+    "---",
+    `id: ${id}`,
+    `name: ${id}`,
+    "analogyDensity: low",
+    "order: conclusion-first",
+    "abstraction: concrete",
+    "exampleType: e",
+    "---",
+  ].join("\n");
+}
+
+/** Two of each, so tests are not accidentally measuring the entry-choice rule. */
+function seedLibrary(root: string): void {
+  for (const id of ["a", "b"]) {
+    writeFileSync(join(root, "personas", `${id}.md`), persona(id), "utf8");
+    writeFileSync(join(root, "styles", `${id}.md`), style(id), "utf8");
+  }
+}
+
+function tmpRoot(t: { after: (fn: () => void) => void }, options: { seed?: boolean } = {}): string {
   const root = mkdtempSync(join(tmpdir(), "atp-validate-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "personas"), { recursive: true });
   mkdirSync(join(root, "styles"), { recursive: true });
   mkdirSync(join(root, "domains"), { recursive: true });
+  if (options.seed !== false) seedLibrary(root);
   return root;
 }
 
@@ -67,14 +94,12 @@ const DEFAULTS = {
   ].join("\n"),
 };
 
-function writeDomain(
-  root: string,
-  files: Partial<typeof DEFAULTS> & { id?: string } = {},
-): void {
+function writeDomain(root: string, files: Partial<typeof DEFAULTS> & { id?: string } = {}): void {
   const dir = join(root, "domains", files.id ?? "d");
   mkdirSync(dir, { recursive: true });
   for (const name of ["meta", "corpus", "misconceptions", "checks", "glossary"] as const) {
-    const content = files[name] ?? (name === "meta" ? DEFAULTS.meta.replace("id: d", `id: ${files.id ?? "d"}`) : DEFAULTS[name]);
+    const content =
+      files[name] ?? (name === "meta" ? DEFAULTS.meta.replace("id: d", `id: ${files.id ?? "d"}`) : DEFAULTS[name]);
     writeFileSync(join(dir, `${name}.md`), content, "utf8");
   }
 }
@@ -92,7 +117,7 @@ function run(root: string): { codes: string[]; errors: number; warnings: number 
   };
 }
 
-test("a well-formed domain produces no errors", (t) => {
+test("a well-formed library and domain produce no errors", (t) => {
   const root = tmpRoot(t);
   writeDomain(root);
   const result = run(root);
@@ -159,17 +184,13 @@ test("an identifier nothing mentions is dead configuration", (t) => {
 
 test("two terms sharing one rendering is an error", (t) => {
   const root = tmpRoot(t);
-  writeDomain(root, {
-    glossary: DEFAULTS.glossary.replace("rendering: 本地墙上时间", "rendering: 偏移量"),
-  });
+  writeDomain(root, { glossary: DEFAULTS.glossary.replace("rendering: 本地墙上时间", "rendering: 偏移量") });
   assert.ok(run(root).codes.includes("glossary.rendering-conflict"));
 });
 
 test("a rendering that collides with a never-translate identifier is an error", (t) => {
   const root = tmpRoot(t);
-  writeDomain(root, {
-    glossary: DEFAULTS.glossary.replace("rendering: 偏移量", "rendering: UTC"),
-  });
+  writeDomain(root, { glossary: DEFAULTS.glossary.replace("rendering: 偏移量", "rendering: UTC") });
   assert.ok(run(root).codes.includes("glossary.rendering-is-identifier"));
 });
 
@@ -201,10 +222,32 @@ test("a check grounded on nothing is an error", (t) => {
   assert.ok(run(root).codes.includes("check.ungrounded"));
 });
 
-test("the missing default composition is surfaced as a warning, not invented", (t) => {
-  const root = tmpRoot(t);
+test("ADR 0007: no voice cannot compose an Expert, and one is not a choice", (t) => {
+  const root = tmpRoot(t, { seed: false });
   writeDomain(root);
+
+  const empty = run(root);
+  assert.ok(empty.codes.includes("library.no-personas"), `got: ${empty.codes.join(", ")}`);
+  assert.ok(empty.codes.includes("library.no-styles"));
+  assert.ok(empty.errors > 0, "nothing to compose an Expert from must block");
+
+  // One of each is enough to compose an Expert, but entry has nothing to offer.
+  writeFileSync(join(root, "personas", "only.md"), persona("only"), "utf8");
+  writeFileSync(join(root, "styles", "only.md"), style("only"), "utf8");
+  const one = run(root);
+  assert.ok(one.codes.includes("library.no-persona-choice"), `got: ${one.codes.join(", ")}`);
+  assert.ok(one.codes.includes("library.no-style-choice"));
+  assert.equal(one.errors, 0, "one voice is a poor library, not a broken one");
+});
+
+test("two voices satisfy entry and raise no library finding", (t) => {
+  const root = tmpRoot(t, { seed: false });
+  writeDomain(root);
+  seedLibrary(root);
   const result = run(root);
-  assert.ok(result.codes.includes("library.no-default-composition"));
-  assert.equal(result.errors, 0, "the validator can report this gap but must not decide it");
+  assert.equal(result.errors, 0, `unexpected errors: ${result.codes.join(", ")}`);
+  assert.ok(
+    !result.codes.some((code) => code.startsWith("library.no-")),
+    `unexpected library findings: ${result.codes.join(", ")}`,
+  );
 });

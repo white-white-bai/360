@@ -342,6 +342,43 @@ export interface ValidateOptions {
   domainsDir?: string;
 }
 
+/**
+ * ADR 0007 has the learner choose a Persona and a Style at entry, which turns
+ * the SIZE of each library into a checkable property rather than a product
+ * opinion: none is an error, one is a warning, and which particular voices
+ * should exist is not something a validator can judge.
+ *
+ * The warning matters more than it looks. A single entry satisfies every other
+ * rule while making the entry screen a formality — the kind of gap that no
+ * amount of rule-reading reveals, because nothing is wrong, there is just
+ * nothing there.
+ */
+function validateChoice(kind: "persona" | "style", count: number, where: string): Finding[] {
+  if (count === 0) {
+    return [
+      finding(
+        "error",
+        `library.no-${kind}s`,
+        where,
+        `no ${kind} exists, so no Expert can be composed at all`,
+        `add at least two ${kind}s — entry offers a choice (ADR 0007)`,
+      ),
+    ];
+  }
+  if (count === 1) {
+    return [
+      finding(
+        "warning",
+        `library.no-${kind}-choice`,
+        where,
+        `only one ${kind} exists, so entry has no choice to offer`,
+        `add a second ${kind}, or accept that this library has one voice (ADR 0007)`,
+      ),
+    ];
+  }
+  return [];
+}
+
 export function validateRepo(options: ValidateOptions = {}): ValidationReport {
   const personasDir = options.personasDir ?? PERSONAS_DIR;
   const stylesDir = options.stylesDir ?? STYLES_DIR;
@@ -349,39 +386,28 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
 
   const findings: Finding[] = [];
 
-  for (const path of markdownFiles(personasDir)) {
+  const personaPaths = markdownFiles(personasDir);
+  const stylePaths = markdownFiles(stylesDir);
+
+  for (const path of personaPaths) {
     const loaded = safely(path, () => loadPersona(path));
     if (loaded.value !== undefined) findings.push(...validateAxis("persona", loaded.value, path));
     if (loaded.problem !== undefined) findings.push(loaded.problem);
   }
-  for (const path of markdownFiles(stylesDir)) {
+  for (const path of stylePaths) {
     const loaded = safely(path, () => loadStyle(path));
     if (loaded.value !== undefined) findings.push(...validateAxis("style", loaded.value, path));
     if (loaded.problem !== undefined) findings.push(loaded.problem);
   }
 
-  const dirs = domainDirs(domainsDir);
-  for (const dir of dirs) {
+  for (const dir of domainDirs(domainsDir)) {
     const loaded = safely(dir, () => loadDomain(dir));
     if (loaded.value !== undefined) findings.push(...validateDomain(loaded.value, dir));
     if (loaded.problem !== undefined) findings.push(loaded.problem);
   }
 
-  // Composition is not declared anywhere yet, so the validator can report the gap
-  // even though it cannot decide what the answer should be. Surfacing it is the
-  // point: a session's Persona and Style are currently chosen by whoever writes
-  // the call site.
-  if (dirs.length > 0) {
-    findings.push(
-      finding(
-        "warning",
-        "library.no-default-composition",
-        "domains/*/meta.md",
-        "no Domain declares which Persona and Style it teaches with by default",
-        "add `defaultPersona` and `defaultStyle` to meta.md, or let the learner choose at entry",
-      ),
-    );
-  }
+  findings.push(...validateChoice("persona", personaPaths.length, "library/personas/"));
+  findings.push(...validateChoice("style", stylePaths.length, "library/styles/"));
 
   const errors = findings.filter((f) => f.severity === "error").length;
   const warnings = findings.filter((f) => f.severity === "warning").length;
