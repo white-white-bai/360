@@ -66,7 +66,31 @@ test("the rich escape hatch must be declared", () => {
   );
   assert.throws(
     () => assertBlackboardEvent({ at: 0, kind: "rich", id: "x", format: "html", body: "<div/>", declared: true }),
-    /format must be one of/,
+    /format.*must be one of/,
+  );
+});
+
+test("render orders by the timeline coordinate, not by array position", () => {
+  // The distinction is invisible while events are appended in order, and becomes
+  // a silently rearranged board the moment a log is read back from disk.
+  const outOfOrder: BlackboardEvent[] = [
+    { at: 5, kind: "text", id: "later", body: "b" },
+    { at: 2, kind: "text", id: "earlier", body: "a" },
+  ];
+  assert.deepEqual(
+    render(outOfOrder).elements.map((e) => e.id),
+    ["earlier", "later"],
+  );
+});
+
+test("events sharing a position keep their array order", () => {
+  const tied: BlackboardEvent[] = [
+    { at: 1, kind: "text", id: "first", body: "a" },
+    { at: 1, kind: "text", id: "second", body: "b" },
+  ];
+  assert.deepEqual(
+    render(tied).elements.map((e) => e.id),
+    ["first", "second"],
   );
 });
 

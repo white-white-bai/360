@@ -6,10 +6,12 @@ import { SpendMeter } from "../providers/meter.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import { excerpt } from "../grounding/corpus.ts";
 import type { SessionLog } from "../events/log.ts";
-import { appendEvent, appendNarration, emptyLog } from "../events/log.ts";
+import { emptyLog } from "../events/log.ts";
 import type { Surface } from "../render/render.ts";
 import { render } from "../render/render.ts";
 import { parseExplanation } from "./explanation.ts";
+import { applySteps } from "./turn.ts";
+import type { SessionStore } from "./store.ts";
 
 /** Actor ids. Separate from Position names so the ledger stays legible. */
 export const ACTOR = {
@@ -27,7 +29,8 @@ const MODEL = "mid";
  *   - the Term Glossary and the never-translate list (ADR 0018)
  *
  * It also states the output contract, because narration and blackboard events
- * arrive interleaved in one payload (ADR 0005).
+ * arrive interleaved in one payload (ADR 0005), and lists the closed event
+ * vocabulary, because a model cannot use a primitive it has not been told about.
  */
 export function buildExplainerPrompt(expert: Expert): { system: string; input: string } {
   const { persona, style, domain } = expert;
@@ -36,18 +39,18 @@ export function buildExplainerPrompt(expert: Expert): { system: string; input: s
     "You are the Lead Explainer in a teaching session.",
     "There is exactly one explainer. Do not hand the lesson to anyone else.",
     "",
-    `# Persona — who is speaking`,
+    "# Persona — who is speaking",
     `name: ${persona.name}`,
     `stance: ${persona.stance}`,
     `register: ${persona.register}`,
     "",
-    `# Style — how the explanation is built`,
+    "# Style — how the explanation is built",
     `analogyDensity: ${style.analogyDensity}`,
     `order: ${style.order}`,
     `abstraction: ${style.abstraction}`,
     `exampleType: ${style.exampleType}`,
     "",
-    `# Domain — what you may assert`,
+    "# Domain — what you may assert",
     `name: ${domain.name}`,
     "Every statement about the world must be supported by one of the corpus passages below.",
     "Anything the passages do not support must be either dropped or openly marked as an analogy,",
@@ -69,8 +72,21 @@ export function buildExplainerPrompt(expert: Expert): { system: string; input: s
     "Return JSON only, no prose around it:",
     `{"steps":[{"say":"..."},{"event":{"kind":"text","id":"...","body":"..."}}]}`,
     "Interleave `say` and `event` so the board fills in as you speak.",
-    "Event kinds: text, shape, point, highlight, erase, rich.",
     "Do not include an `at` field — position on the timeline is assigned for you.",
+    "",
+    "# Blackboard vocabulary (closed — nothing outside this list)",
+    '- text:  {id, body}',
+    '- shape: {id, shape: rect|ellipse|arrow|line, from, to}   from/to are element ids',
+    '- axis:  {id, label, from, to, marks:[{value, label?}]}   a scale; numbers are domain values, not pixels',
+    '- band:  {id, axis, from, to, label, emphasis: neutral|attention}   a span on an axis',
+    '- table: {id, columns:[...], rows:[[...]]}   rows must match the column count',
+    '- point:     {target}   move attention to an existing element',
+    '- highlight: {target}   mark an existing element as the thing to notice',
+    '- erase:     {target}   remove an existing element',
+    '- rich:      {id, format: mermaid|excalidraw|svg, body, declared: true}',
+    "Prefer axis + band over paragraphs when something has a scale or a range:",
+    "the renderer lays them out, you only say what they mean.",
+    "`rich` is a declared escape hatch. Use it only when nothing above can express the idea.",
   ].join("\n");
 
   const input = [
@@ -87,6 +103,8 @@ export interface BaselineInput {
   check: UnderstandingCheck;
   learnerAnswer: string;
   sessionId?: string;
+  /** When present, the session is persisted so it can be resumed (ADR 0002). */
+  store?: SessionStore;
 }
 
 export interface BaselineResult {
@@ -94,6 +112,7 @@ export interface BaselineResult {
   surface: Surface;
   verdict: CheckVerdict;
   usage: LedgerRow;
+  saved: boolean;
 }
 
 /**
@@ -126,25 +145,19 @@ export async function runBaselineSession(
 
   const explanation = parseExplanation(completion.text);
 
-  let log = emptyLog(input.sessionId ?? `baseline-${input.expert.domain.id}`);
-  let at = 0;
-  for (const step of explanation.steps) {
-    if (step.say !== undefined) {
-      log = appendNarration(log, { at, actor: "lead-explainer", text: step.say });
-      at += 1;
-      continue;
-    }
-    if (step.event !== undefined) {
-      log = appendEvent(log, { ...step.event, at });
-      at += 1;
-    }
-  }
-
+  const sessionId = input.sessionId ?? `baseline-${input.expert.domain.id}`;
+  const log = applySteps(emptyLog(sessionId), explanation.steps, "lead-explainer");
   const surface = render(log.events);
 
   // The check is an asset and the comparison is objective, so grading makes no
   // model call — and, more importantly, the explainer is not involved in it.
   const verdict = gradeObjectively(input.check, input.learnerAnswer);
 
-  return { log, surface, verdict, usage: meter.total() };
+  let saved = false;
+  if (input.store !== undefined) {
+    input.store.save(log);
+    saved = input.store.has(sessionId);
+  }
+
+  return { log, surface, verdict, usage: meter.total(), saved };
 }

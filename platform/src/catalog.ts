@@ -17,3 +17,10 @@ export const LIBRARY_DIR = join(REPO_ROOT, "library");
 export const PERSONAS_DIR = join(LIBRARY_DIR, "personas");
 export const STYLES_DIR = join(LIBRARY_DIR, "styles");
 export const DOMAINS_DIR = join(REPO_ROOT, "domains");
+
+/**
+ * Session records. SENSITIVE (ADR 0002): a log holds the learner's
+ * misconceptions and their own words, so this directory is gitignored and the
+ * store can prove a deletion rather than merely attempt one.
+ */
+export const SESSIONS_DIR = join(REPO_ROOT, "platform", ".sessions");
