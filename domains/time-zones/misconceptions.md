@@ -2,10 +2,10 @@
 The Misconception catalogue (ADR 0004): how learners typically get this Domain
 wrong, stated as the learner would hold it, plus how it is refuted.
 
-`diagnosedBy` documents which checks detect the misconception. An empty list is
-legal but is a completeness gap: a misconception nothing can diagnose is a
-catalogue entry nothing will ever refute (ADR 0009). test/assets.test.ts
-enforces reachability over the checks in this Domain.
+There is deliberately no `diagnosedBy` field here. Which checks detect a
+misconception is stated by each check's `diagnoses`, and keeping a second copy
+would let the two disagree. `npm run validate` derives reachability from the
+checks and fails if an entry below cannot be diagnosed (ADR 0009).
 
 REMOVED — "UTC 和 GMT 是同一个东西" (previously M-utc-is-gmt). It was cut because
 no corpus passage supported the claim and no check could diagnose it, which made

@@ -1,7 +1,6 @@
 ---
 neverTranslate:
   - UTC
-  - GMT
   - RFC 3339
   - RFC 9557
   - IANA
@@ -15,6 +14,14 @@ teaching is delivered in Chinese, and this file pins the renderings so the
 translation cannot drift. Identifiers are not descriptions — they are citations,
 and they are listed under `neverTranslate` instead.
 
+Every term below must actually appear in the corpus; `npm run validate` checks
+that. Terms are matched with hyphens treated as spaces, because `wall-clock` and
+`wall clock` are the same term and the hyphen is typography, not vocabulary.
+
+`GMT` was removed from `neverTranslate` when the misconception that depended on
+it left the corpus: an identifier nothing mentions is dead configuration, and the
+validator now reports it as such.
+
 ## offset
 
 rendering: 偏移量
@@ -27,11 +34,11 @@ rendering: 时区
 
 rendering: 瞬时点
 
-## wall clock time
+## wall clock
 
 rendering: 本地墙上时间
 
-## daylight saving time
+## daylight saving
 
 rendering: 夏令时
 

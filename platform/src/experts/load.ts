@@ -60,7 +60,6 @@ export function parseMisconceptions(markdown: string, domainId: string): Misconc
     name: requireString(section.fields, "name", `${where} \`${section.id}\``),
     wrongModel: requireString(section.fields, "wrongModel", `${where} \`${section.id}\``),
     refutation: requireString(section.fields, "refutation", `${where} \`${section.id}\``),
-    diagnosedBy: optionalList(section.fields, "diagnosedBy"),
   }));
 }
 

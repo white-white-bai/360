@@ -34,6 +34,14 @@ export interface Style {
   exampleType: string;
 }
 
+/**
+ * Note the absence of a `diagnosedBy` field.
+ *
+ * Which checks detect a misconception is already stated by each check's
+ * `diagnoses`, and a second copy here could only ever drift out of agreement
+ * with the first. So one direction of the relation is written down and the other
+ * is derived — by the validator, which fails if an entry below cannot be reached.
+ */
 export interface Misconception {
   id: string;
   name: string;
@@ -41,8 +49,6 @@ export interface Misconception {
   wrongModel: string;
   /** How it is refuted. */
   refutation: string;
-  /** Checks that can diagnose it. Empty is allowed in Phase 1; the validator flags it. */
-  diagnosedBy: string[];
 }
 
 export interface Domain {

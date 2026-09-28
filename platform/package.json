@@ -8,6 +8,8 @@
   },
   "scripts": {
     "estimate": "node src/cost/estimate.ts",
+    "baseline": "node src/session/run-baseline.ts",
+    "validate": "node src/validate/run-validate.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test"
   },
