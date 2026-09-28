@@ -10,6 +10,11 @@ import { assertBlackboardEvent } from "../events/types.ts";
  * expressible. They are stored as two separate streams afterwards, sharing one
  * timeline — the interleaving is the input format, not the storage format.
  *
+ * A step may also be a `probe`: a point where the session stops and asks the
+ * learner to say something back (ADR 0013). The probe's TEXT is authored before
+ * the narration, by a different actor, so the explainer is placing questions it
+ * did not write rather than grading itself.
+ *
  * The payload is JSON produced by a model, which makes `parseExplanation` a
  * trust boundary. Every event is re-validated; an unknown `kind` is refused
  * rather than passed to the renderer.
@@ -17,6 +22,8 @@ import { assertBlackboardEvent } from "../events/types.ts";
 export interface ExplanationStep {
   say?: string;
   event?: BlackboardEvent;
+  /** A probe id, referencing a probe authored earlier in the session. */
+  probe?: string;
 }
 
 export interface Explanation {
@@ -45,16 +52,23 @@ export function parseExplanation(text: string): Explanation {
     const at = `explanation step ${index}`;
     if (!isRecord(raw)) throw new Error(`${at} must be an object`);
 
-    const hasSay = typeof raw.say === "string";
-    const hasEvent = raw.event !== undefined;
-    if (hasSay === hasEvent) {
-      throw new Error(`${at} must have exactly one of \`say\` or \`event\``);
+    const forms = [typeof raw.say === "string", raw.event !== undefined, raw.probe !== undefined].filter(
+      (present) => present,
+    ).length;
+    if (forms !== 1) {
+      throw new Error(`${at} must have exactly one of \`say\`, \`event\` or \`probe\``);
     }
 
-    if (hasSay) {
-      const say = raw.say as string;
-      if (say.trim() === "") throw new Error(`${at} has an empty \`say\``);
-      return { say };
+    if (typeof raw.say === "string") {
+      if (raw.say.trim() === "") throw new Error(`${at} has an empty \`say\``);
+      return { say: raw.say };
+    }
+
+    if (raw.probe !== undefined) {
+      if (typeof raw.probe !== "string" || raw.probe.trim() === "") {
+        throw new Error(`${at} \`probe\` must be a non-empty probe id`);
+      }
+      return { probe: raw.probe };
     }
 
     // `at` is assigned from the step order, so a model never chooses its own
@@ -71,7 +85,9 @@ export function parseExplanation(text: string): Explanation {
 export function offsetSteps(explanation: Explanation, base: number): Explanation {
   return {
     steps: explanation.steps.map((step, index) => {
-      if (step.event === undefined) return { say: step.say };
+      if (step.event === undefined) {
+        return step.probe === undefined ? { say: step.say } : { probe: step.probe };
+      }
       return { event: { ...step.event, at: base + index } };
     }),
   };
