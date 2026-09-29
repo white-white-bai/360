@@ -14,6 +14,7 @@
     "validate": "node src/validate/run-validate.ts",
     "experiment": "node src/experiment/run-experiment.ts",
     "board": "node src/ui/serve.ts",
+    "enter": "node src/session/run-entry.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test"
   },

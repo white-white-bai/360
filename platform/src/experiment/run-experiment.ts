@@ -3,7 +3,7 @@ import type { AssertionList } from "../assertions/types.ts";
 import { findCheck } from "../checks/load.ts";
 import { composeExpert, loadLibrary } from "../experts/load.ts";
 import { describeExpert } from "../experts/types.ts";
-import { configFromEnv, liveProvider } from "../providers/openai.ts";
+import { selectLiveProvider } from "../providers/live.ts";
 import { ScriptedProvider } from "../providers/scripted.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import { apparatusTrialScript, baselineTrialScript, EXPERIMENT_LIST, PROFILES } from "./fixtures-experiment.ts";
@@ -28,6 +28,7 @@ const usd = (value: number): string => `$${value.toFixed(4)}`;
 
 async function main(): Promise<void> {
   const live = process.argv.includes("--live");
+  const liveSelection = live ? selectLiveProvider() : null;
 
   const library = loadLibrary();
   const expert = composeExpert(library, "patient-explainer", "analogy-heavy", "time-zones");
@@ -51,13 +52,12 @@ async function main(): Promise<void> {
   console.log("  baseline = the apparatus with semanticVerify, probes and challenger switched off");
 
   if (live) {
-    if (liveProvider() === null) {
+    if (liveSelection === null) {
       console.error("\n--live was asked for, but no provider is configured. Run `npm run probe` for the details.");
       process.exitCode = 1;
       return;
     }
-    const config = configFromEnv();
-    console.log(`\n  MODE LIVE — via ${config.baseUrl}, model ${config.model}`);
+    console.log(`\n  MODE LIVE — ${liveSelection.describe}`);
     console.log("  The first trial generates the claims; every later trial is given them.");
   } else {
     console.log("\n  MODE FIXTURE — recorded responses, so the numbers below are ILLUSTRATIVE, not");
@@ -74,9 +74,9 @@ async function main(): Promise<void> {
   const rows: Array<{ learner: string; trial: TrialResult }> = [];
   for (const profile of PROFILES) {
     for (const condition of CONDITIONS) {
-      const provider: ModelProvider = live
-        ? (liveProvider() as ModelProvider)
-        : new ScriptedProvider(condition === "baseline" ? baselineTrialScript() : apparatusTrialScript(profile));
+      const provider: ModelProvider =
+        liveSelection?.provider ??
+        new ScriptedProvider(condition === "baseline" ? baselineTrialScript() : apparatusTrialScript(profile));
 
       const result = await runTrial(condition, provider, {
         expert,

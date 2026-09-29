@@ -6,6 +6,7 @@ import { surfaceToText } from "../render/text.ts";
 import { runApparatusSession } from "./apparatus.ts";
 import type { ApparatusResult } from "./apparatus.ts";
 import { cleanScript, misconceptionScript } from "./fixtures-apparatus.ts";
+import { recordCandidates } from "../grounding/candidates.ts";
 
 const usd = (n: number): string => `$${n.toFixed(6)}`;
 
@@ -45,6 +46,13 @@ function summarise(label: string, result: ApparatusResult): void {
     console.log(`  ${outcome.probeId} ${tone} ${outcome.misconceptionId ?? ""} ${outcome.reason}`);
   }
 
+  console.log(
+    `UNLISTED   ${
+      result.unlistedConcerns.length === 0
+        ? "none — every concern matched a catalogue entry"
+        : `${result.unlistedConcerns.length} concern(s) the catalogue does not know`
+    }`,
+  );
   console.log(`CHALLENGER ${result.challenge.fired ? `summoned by ${result.challenge.triggers.join(", ")}` : "not summoned"}`);
   console.log(`VERDICT    ${result.verdict?.verdict.toUpperCase() ?? "n/a"}  (${result.verdict?.diagnosis?.reason ?? "no diagnosis"})`);
   console.log(`USAGE      calls ${result.usage.calls}  in ${result.usage.inputTokens} tok  out ${result.usage.outputTokens} tok  ${usd(result.usage.costUsd)}`);
@@ -111,6 +119,18 @@ async function main(): Promise<void> {
     sessionId: "demo-apparatus-stopped",
   });
   summarise("SCENARIO 3 — one claim the source does not support", stopped);
+
+  // ADR 0004: a concern that matches no entry is evidence the catalogue is short. Queued
+  // where the Domain owner will see it, and NOT in the Domain — the queue holds the
+  // learner's own words, which ADR 0002 makes sensitive and which the next `git add -A`
+  // would otherwise commit.
+  const concerns = [...clean.unlistedConcerns, ...dirty.unlistedConcerns, ...stopped.unlistedConcerns];
+  const added = recordCandidates(expert.domain.id, concerns);
+  console.log(
+    added === 0
+      ? `\nUNLISTED CONCERNS  ${concerns.length} seen, none new — the queue is unchanged.`
+      : `\nUNLISTED CONCERNS  ${added} added to platform/.sessions/candidates/${expert.domain.id}.md`,
+  );
 
   console.log("\nPhase 4 is complete: claims are separated from delivery, verified by the kernel and");
   console.log("then by an independent actor, probes are authored by someone other than the explainer,");

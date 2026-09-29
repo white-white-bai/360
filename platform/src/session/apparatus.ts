@@ -183,6 +183,14 @@ const PROBE_EVALUATOR_SYSTEM = (expert: Expert): string =>
 
 // --------------------------------------------------------------- the session --
 
+export interface UnlistedConcern {
+  probeId: string;
+  /** What the learner actually said. Their own words, so it is sensitive like the rest. */
+  answer: string;
+  /** The evaluator's account of what looked wrong, which is the raw material for an entry. */
+  reason: string;
+}
+
 export interface ApparatusInput {
   expert: Expert;
   check: UnderstandingCheck;
@@ -236,6 +244,20 @@ export interface ApparatusResult {
   semantic: SemanticVerdict[];
   probes: Probe[];
   outcomes: ProbeOutcome[];
+  /**
+   * Concerns the catalogue does not recognise (ADR 0004).
+   *
+   * A probe reporting "something is wrong here and I cannot name it" is evidence the
+   * Misconception catalogue is incomplete. Dropping it means every unanticipated wrong
+   * idea is forgotten the moment the session ends, and the catalogue can only ever hold
+   * what somebody thought of in advance — which is the opposite of what a catalogue of
+   * misconceptions is for.
+   *
+   * Returned rather than written. A session does not get to edit the Domain it was
+   * taught from; deciding that a candidate is worth an entry is the Domain owner's job,
+   * and it has to be, because every entry must also be reachable from a check.
+   */
+  unlistedConcerns: UnlistedConcern[];
   challenge: { fired: boolean; triggers: string[] };
   /** The first sitting. */
   verdict: CheckVerdict | null;
@@ -340,6 +362,7 @@ export async function runApparatusSession(
         semantic,
         probes: [],
         outcomes: [],
+        unlistedConcerns: [],
         challenge: { fired: false, triggers: [] },
         verdict: null,
         verdictAfterRetry: null,
@@ -412,6 +435,17 @@ export async function runApparatusSession(
     }
     phases.push("probe-evaluation");
   }
+
+  // A concern with no matching entry is the catalogue saying it is short. The index
+  // pairs the outcome with the answer it was graded from, in the authored order.
+  const unlistedConcerns: UnlistedConcern[] = outcomes
+    .map((outcome, index) => ({ outcome, index }))
+    .filter(({ outcome }) => outcome.concern && outcome.misconceptionId === null)
+    .map(({ outcome, index }) => ({
+      probeId: outcome.probeId,
+      answer: input.probeAnswers[index] ?? "",
+      reason: outcome.reason,
+    }));
 
   // 8 — the Challenger, on exactly two triggers.
   const triggers: string[] = [];
@@ -499,6 +533,7 @@ export async function runApparatusSession(
     semantic,
     probes,
     outcomes,
+    unlistedConcerns,
     challenge: { fired: triggers.length > 0 && !off("challenger"), triggers },
     verdict,
     verdictAfterRetry,

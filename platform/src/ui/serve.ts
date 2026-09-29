@@ -7,7 +7,7 @@ import { findCheck } from "../checks/load.ts";
 import { composeExpert, loadLibrary } from "../experts/load.ts";
 import { describeExpert } from "../experts/types.ts";
 import { PROFILES } from "../experiment/fixtures-experiment.ts";
-import { configFromEnv, liveProvider } from "../providers/openai.ts";
+import { selectLiveProvider } from "../providers/live.ts";
 import { ScriptedProvider } from "../providers/scripted.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import { render } from "../render/render.ts";
@@ -81,7 +81,7 @@ export function createBoardServer(options: BoardOptions = {}): Server {
     };
 
     const wantsLive = url.searchParams.get("live") === "1";
-    const live = wantsLive ? liveProvider() : null;
+    const live = wantsLive ? selectLiveProvider() : null;
     if (wantsLive && live === null && options.provider === undefined) {
       send("failed", "no provider is configured — see `npm run probe`");
       response.end();
@@ -92,7 +92,7 @@ export function createBoardServer(options: BoardOptions = {}): Server {
     // The page says which mode it is in rather than letting a replay pass for a live
     // session.
     const provider: ModelProvider =
-      options.provider ?? live ?? new ScriptedProvider(misconceptionScript(), { chunkDelayMs });
+      options.provider ?? live?.provider ?? new ScriptedProvider(misconceptionScript(), { chunkDelayMs });
     const profile = PROFILES[1] as (typeof PROFILES)[number];
 
     send("meta", {
@@ -101,7 +101,7 @@ export function createBoardServer(options: BoardOptions = {}): Server {
       detail:
         live === null
           ? `夹具回放 · 每步 ${chunkDelayMs}ms`
-          : `${configFromEnv().model} · ${configFromEnv().baseUrl}`,
+          : (live?.describe ?? "live"),
     });
 
     void (async () => {

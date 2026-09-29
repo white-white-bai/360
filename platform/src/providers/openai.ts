@@ -1,5 +1,6 @@
 import type { Completion, CompletionRequest, ModelProvider, StreamEvent, Usage } from "./types.ts";
 import { setPrice } from "./pricing.ts";
+import { envNumber, envValue } from "./env.ts";
 import { estimateTokens } from "../util/tokens.ts";
 
 /**
@@ -28,21 +29,8 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 
 export class MissingProviderConfig extends Error {}
 
-function envValue(env: NodeJS.ProcessEnv, ...names: string[]): string | undefined {
-  for (const name of names) {
-    const value = env[name];
-    if (value !== undefined && value.trim() !== "") return value.trim();
-  }
-  return undefined;
-}
-
-function envNumber(env: NodeJS.ProcessEnv, name: string): number | undefined {
-  const raw = envValue(env, name);
-  if (raw === undefined) return undefined;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed)) throw new MissingProviderConfig(`${name} must be a number, got ${JSON.stringify(raw)}`);
-  return parsed;
-}
+// The environment readers are shared with the Anthropic adapter now that there are two;
+// two copies would eventually disagree about whitespace or about which name wins.
 
 /**
  * Read the configuration from the environment.
