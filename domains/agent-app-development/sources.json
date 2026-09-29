@@ -1,0 +1,52 @@
+[
+  {
+    "index": 0,
+    "requested": "https://www.anthropic.com/engineering/building-effective-agents",
+    "url": "https://www.anthropic.com/engineering/building-effective-agents",
+    "fetchedAt": "2026-09-29T06:50:43.934Z",
+    "mediaType": "text/html",
+    "sha256": "35760825d20aaa9be964d09becc1b609ace085a02c28bb063698388a672c8bd4",
+    "bytes": 212195,
+    "text": "sources/00-www-anthropic-com-engineering-building-effective-agents.txt"
+  },
+  {
+    "index": 1,
+    "requested": "https://modelcontextprotocol.io/specification/2025-06-18",
+    "url": "https://modelcontextprotocol.io/specification/2025-06-18",
+    "fetchedAt": "2026-09-29T06:50:44.404Z",
+    "mediaType": "text/html",
+    "sha256": "e1bdde9b0fd002f8177a655dbf58cb8aee9ca24d915e76c7ae078129c8d1864e",
+    "bytes": 316736,
+    "text": "sources/01-modelcontextprotocol-io-specification-2025-06-18.txt"
+  },
+  {
+    "index": 2,
+    "requested": "https://openai.github.io/openai-agents-python/",
+    "url": "https://openai.github.io/openai-agents-python/",
+    "fetchedAt": "2026-09-29T06:50:45.151Z",
+    "mediaType": "text/html",
+    "sha256": "0878d82de59d237ff35c3a12dec21390ee21822493a4acf615ae3c59fb916558",
+    "bytes": 76263,
+    "text": "sources/02-openai-github-io-openai-agents-python.txt"
+  },
+  {
+    "index": 3,
+    "requested": "https://google.github.io/adk-docs/",
+    "url": "https://adk.dev/",
+    "fetchedAt": "2026-09-29T06:50:46.040Z",
+    "mediaType": "text/html",
+    "sha256": "d409cb9d647788d41551e1c951a9952cff218a82703c7197c9b9438d9732677b",
+    "bytes": 126989,
+    "text": "sources/03-adk-dev.txt"
+  },
+  {
+    "index": 4,
+    "requested": "https://opentelemetry.io/docs/specs/semconv/gen-ai/",
+    "url": "https://opentelemetry.io/docs/specs/semconv/gen-ai/",
+    "fetchedAt": "2026-09-29T06:50:46.350Z",
+    "mediaType": "text/html",
+    "sha256": "39c86c9766cda098048b9bc8b8b24b7615dcaa9b8808f79c25a296ef5b789b4f",
+    "bytes": 172981,
+    "text": "sources/04-opentelemetry-io-docs-specs-semconv-gen-ai.txt"
+  }
+]

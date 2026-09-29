@@ -1,0 +1,42 @@
+[
+  {
+    "index": 0,
+    "requested": "https://modelcontextprotocol.io/specification/2025-06-18",
+    "url": "https://modelcontextprotocol.io/specification/2025-06-18",
+    "fetchedAt": "2026-09-29T06:20:14.142Z",
+    "mediaType": "text/html",
+    "sha256": "e1bdde9b0fd002f8177a655dbf58cb8aee9ca24d915e76c7ae078129c8d1864e",
+    "bytes": 316736,
+    "text": "sources/00-modelcontextprotocol-io-specification-2025-06-18.txt"
+  },
+  {
+    "index": 1,
+    "requested": "https://arxiv.org/abs/2210.03629",
+    "url": "https://arxiv.org/abs/2210.03629",
+    "fetchedAt": "2026-09-29T06:20:14.740Z",
+    "mediaType": "text/html",
+    "sha256": "225fdf71921678c3587183e8808095552fbd6361be19062fa98624923152f3ee",
+    "bytes": 44231,
+    "text": "sources/01-arxiv-org-abs-2210-03629.txt"
+  },
+  {
+    "index": 2,
+    "requested": "https://opentelemetry.io/docs/specs/semconv/gen-ai/",
+    "url": "https://opentelemetry.io/docs/specs/semconv/gen-ai/",
+    "fetchedAt": "2026-09-29T06:20:15.074Z",
+    "mediaType": "text/html",
+    "sha256": "39c86c9766cda098048b9bc8b8b24b7615dcaa9b8808f79c25a296ef5b789b4f",
+    "bytes": 172981,
+    "text": "sources/02-opentelemetry-io-docs-specs-semconv-gen-ai.txt"
+  },
+  {
+    "index": 3,
+    "requested": "https://json-schema.org/draft/2020-12/json-schema-core.html",
+    "url": "https://json-schema.org/draft/2020-12/json-schema-core",
+    "fetchedAt": "2026-09-29T06:20:16.455Z",
+    "mediaType": "text/html",
+    "sha256": "b104808267c75a61444912cf450818a6af17745abe27b2f8d2cf173868e62266",
+    "bytes": 342564,
+    "text": "sources/03-json-schema-org-draft-2020-12-json-schema-core.txt"
+  }
+]

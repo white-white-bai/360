@@ -1,0 +1,52 @@
+[
+  {
+    "index": 0,
+    "requested": "https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview",
+    "url": "https://claude.com/app-unavailable-in-region",
+    "fetchedAt": "2026-09-29T06:53:55.033Z",
+    "mediaType": "text/html",
+    "sha256": "a98c23dc8c55088aafb0cb48b44cf7aad297c95c0fcfd2247e883bf5d5508d64",
+    "bytes": 447830,
+    "text": "sources/00-claude-com-app-unavailable-in-region.txt"
+  },
+  {
+    "index": 1,
+    "requested": "https://modelcontextprotocol.io/specification/2025-06-18",
+    "url": "https://modelcontextprotocol.io/specification/2025-06-18",
+    "fetchedAt": "2026-09-29T06:53:55.514Z",
+    "mediaType": "text/html",
+    "sha256": "e1bdde9b0fd002f8177a655dbf58cb8aee9ca24d915e76c7ae078129c8d1864e",
+    "bytes": 316736,
+    "text": "sources/01-modelcontextprotocol-io-specification-2025-06-18.txt"
+  },
+  {
+    "index": 2,
+    "requested": "https://openai.github.io/openai-agents-python/",
+    "url": "https://openai.github.io/openai-agents-python/",
+    "fetchedAt": "2026-09-29T06:53:55.943Z",
+    "mediaType": "text/html",
+    "sha256": "0878d82de59d237ff35c3a12dec21390ee21822493a4acf615ae3c59fb916558",
+    "bytes": 76263,
+    "text": "sources/02-openai-github-io-openai-agents-python.txt"
+  },
+  {
+    "index": 3,
+    "requested": "https://langchain-ai.github.io/langgraph/",
+    "url": "https://langchain-ai.github.io/langgraph/",
+    "fetchedAt": "2026-09-29T06:53:56.192Z",
+    "mediaType": "text/html",
+    "sha256": "8c8f7c81f7f02571c254c80f0452d3ff24372102501749c866671e87b5866c2a",
+    "bytes": 757,
+    "text": "sources/03-langchain-ai-github-io-langgraph.txt"
+  },
+  {
+    "index": 4,
+    "requested": "https://arxiv.org/abs/2210.03629",
+    "url": "https://arxiv.org/abs/2210.03629",
+    "fetchedAt": "2026-09-29T06:53:56.422Z",
+    "mediaType": "text/html",
+    "sha256": "225fdf71921678c3587183e8808095552fbd6361be19062fa98624923152f3ee",
+    "bytes": 44231,
+    "text": "sources/04-arxiv-org-abs-2210-03629.txt"
+  }
+]
