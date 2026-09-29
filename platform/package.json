@@ -7,6 +7,7 @@
     "node": ">=22.6"
   },
   "scripts": {
+    "probe": "node src/providers/probe.ts",
     "estimate": "node src/cost/estimate.ts",
     "baseline": "node src/session/run-baseline.ts",
     "apparatus": "node src/session/run-apparatus.ts",

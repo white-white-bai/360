@@ -27,6 +27,18 @@ export function priceFor(model: string): ModelPrice {
   return PRICES[model] ?? FALLBACK_PRICE;
 }
 
+/**
+ * Register a model's real price, so the ledger reports money rather than tokens.
+ *
+ * The defaults above are placeholders and say so; this is how a run replaces them
+ * with something an operator actually knows. Deliberately not read from the
+ * environment in this module — configuration belongs to whoever starts the
+ * provider, not to the price table.
+ */
+export function setPrice(model: string, price: ModelPrice): void {
+  PRICES[model] = price;
+}
+
 export function costOf(model: string, inputTokens: number, outputTokens: number): number {
   const price = priceFor(model);
   return (
