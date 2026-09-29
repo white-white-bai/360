@@ -55,7 +55,10 @@ function summarise(label: string, result: ApparatusResult): void {
   );
   console.log(`CHALLENGER ${result.challenge.fired ? `summoned by ${result.challenge.triggers.join(", ")}` : "not summoned"}`);
   console.log(`VERDICT    ${result.verdict?.verdict.toUpperCase() ?? "n/a"}  (${result.verdict?.diagnosis?.reason ?? "no diagnosis"})`);
-  console.log(`USAGE      calls ${result.usage.calls}  in ${result.usage.inputTokens} tok  out ${result.usage.outputTokens} tok  ${usd(result.usage.costUsd)}`);
+  console.log(
+    `USAGE      calls ${result.usage.calls}  in ${result.usage.inputTokens} tok  out ${result.usage.outputTokens} tok  ` +
+      `${usd(result.usage.costUsd)}${result.usage.priced ? "" : "   (PLACEHOLDER prices — this is not a measurement)"}`,
+  );
 
   console.log("\nBOARD (replayed from the event log)");
   for (const line of surfaceToText(result.surface).split("\n")) console.log(`  ${line}`);

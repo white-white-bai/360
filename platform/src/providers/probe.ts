@@ -1,4 +1,4 @@
-import { costOf } from "./pricing.ts";
+import { costOf, isPlaceholderPrice } from "./pricing.ts";
 import { configFromEnv, MissingProviderConfig, OpenAiCompatibleProvider } from "./openai.ts";
 
 /**
@@ -54,7 +54,12 @@ async function main(): Promise<void> {
     console.log(`  latency  : ${elapsed} ms`);
     console.log(`  text     : ${JSON.stringify(completion.text.slice(0, 120))}`);
     console.log(`  tokens   : ${completion.usage.inputTokens} in, ${completion.usage.outputTokens} out`);
-    console.log(`  cost     : $${costOf(config.model, completion.usage.inputTokens, completion.usage.outputTokens).toFixed(6)}`);
+    const cost = costOf(config.model, completion.usage.inputTokens, completion.usage.outputTokens);
+    const placeholder = isPlaceholderPrice(config.model);
+    console.log(
+      `  cost     : ${placeholder ? "≈" : ""}$${cost.toFixed(6)}` +
+        (placeholder ? "   (placeholder prices — not a measurement)" : ""),
+    );
     if (provider.usageEstimated) {
       console.log("  NOTE     : the endpoint reported no usage, so the token counts above are estimates");
     }

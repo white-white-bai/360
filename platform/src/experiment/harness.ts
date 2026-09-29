@@ -126,6 +126,14 @@ export interface TrialResult {
   challengeFired: boolean;
   calls: number;
   costUsd: number;
+  /**
+   * True when the cost came from the placeholder price table rather than a real price.
+   *
+   * Carried alongside the number so a report can mark it. A cost figure that is wrong is
+   * worse than no cost figure, because it is the one number in the output that looks like
+   * it was measured.
+   */
+  costIsPlaceholder: boolean;
   selfAssessment: number | null;
   /** self-assessment minus the measured result. Positive means they felt better than they did. */
   illusionGap: number | null;
@@ -216,6 +224,7 @@ export async function runTrial(
     challengeFired: result.challenge.fired,
     calls: result.usage.calls,
     costUsd: result.usage.costUsd,
+    costIsPlaceholder: !result.usage.priced,
     selfAssessment,
     illusionGap: selfAssessment === null ? null : selfAssessment - (passed ? 1 : 0),
     retention,

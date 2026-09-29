@@ -104,6 +104,11 @@ async function main(): Promise<void> {
     }
   }
 
+  // A dollar figure computed from a fallback rate is not a measurement. Marking it where
+  // it is printed is the only reason the flag exists.
+  const placeholderPrices = trials.some((trial) => trial.costIsPlaceholder);
+  const money = (value: number): string => (placeholderPrices ? `≈${usd(value)}` : usd(value));
+
   console.log("\nPER TRIAL");
   console.log(
     `  ${pad("condition", 12)}${pad("learner", 26)}${pad("result", 9)}${pad("decided by", 13)}${right("concerns", 9)}${right("calls", 7)}${right("cost", 10)}`,
@@ -113,7 +118,7 @@ async function main(): Promise<void> {
     // are different claims about the learner and must not look the same.
     const decidedBy = trial.retakeCheckId ?? check.id;
     console.log(
-      `  ${pad(trial.condition, 12)}${pad(learner, 26)}${pad(trial.passed ? "pass" : "FAIL", 9)}${pad(decidedBy, 13)}${right(String(trial.probeConcerns), 9)}${right(String(trial.calls), 7)}${right(usd(trial.costUsd), 10)}`,
+      `  ${pad(trial.condition, 12)}${pad(learner, 26)}${pad(trial.passed ? "pass" : "FAIL", 9)}${pad(decidedBy, 13)}${right(String(trial.probeConcerns), 9)}${right(String(trial.calls), 7)}${right(money(trial.costUsd), 10)}`,
     );
   }
 
@@ -124,7 +129,7 @@ async function main(): Promise<void> {
   const pct = (value: number | null): string => (value === null ? "no data" : `${(value * 100).toFixed(0)}%`);
   for (const summary of [comparison.baseline, comparison.apparatus]) {
     console.log(
-      `  ${pad(summary.condition, 12)}${right(String(summary.trials), 8)}${right(String(summary.passed), 8)}${right(`${(summary.passRate * 100).toFixed(0)}%`, 8)}${right(pct(summary.retentionRate), 11)}${right(pct(summary.transferRate), 10)}${right(summary.meanCalls.toFixed(1), 12)}${right(usd(summary.meanCostUsd), 12)}${right(summary.meanIllusionGap === null ? "n/a" : summary.meanIllusionGap.toFixed(2), 10)}`,
+      `  ${pad(summary.condition, 12)}${right(String(summary.trials), 8)}${right(String(summary.passed), 8)}${right(`${(summary.passRate * 100).toFixed(0)}%`, 8)}${right(pct(summary.retentionRate), 11)}${right(pct(summary.transferRate), 10)}${right(summary.meanCalls.toFixed(1), 12)}${right(money(summary.meanCostUsd), 12)}${right(summary.meanIllusionGap === null ? "n/a" : summary.meanIllusionGap.toFixed(2), 10)}`,
     );
   }
   console.log(`  ${pad("challenges", 12)}${right(`baseline ${comparison.baseline.challenges}`, 24)}${right(`apparatus ${comparison.apparatus.challenges}`, 24)}`);
@@ -134,6 +139,13 @@ async function main(): Promise<void> {
 
   if (comparison.caveat !== null) {
     console.log(`\n  READ THIS TOO — ${comparison.caveat}`);
+  }
+  if (placeholderPrices) {
+    console.log(
+      "\n  The costs above are PLACEHOLDER prices. This model is not in the price table, so the dollars" +
+        "\n  come from the fallback rate in src/providers/pricing.ts and measure nothing. Set ATP_PRICE_IN" +
+        "\n  and ATP_PRICE_OUT to the real numbers before quoting any of them.",
+    );
   }
   const followUpHours = comparison.apparatus.meanFollowUpHours;
   if (followUpHours !== null) {

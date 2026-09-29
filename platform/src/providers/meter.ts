@@ -1,5 +1,5 @@
 import type { Completion, CompletionRequest, ModelProvider, StreamEvent, Usage } from "./types.ts";
-import { costOf } from "./pricing.ts";
+import { costOf, isPlaceholderPrice } from "./pricing.ts";
 import { estimateTokens } from "../util/tokens.ts";
 
 export interface LedgerRow {
@@ -8,10 +8,19 @@ export interface LedgerRow {
   inputTokens: number;
   outputTokens: number;
   costUsd: number;
+  /**
+   * False when any call in this row was priced from the placeholder table.
+   *
+   * `costUsd` is still a number and still looks like money, so the flag is what stops a
+   * run against an unpriced model from reporting a figure nobody measured. It is a
+   * property of the row rather than of the run because the rows are per actor, and
+   * "which actor is expensive" is the question this ledger exists to answer.
+   */
+  priced: boolean;
 }
 
 function emptyRow(actor: string): LedgerRow {
-  return { actor, calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0 };
+  return { actor, calls: 0, inputTokens: 0, outputTokens: 0, costUsd: 0, priced: true };
 }
 
 /**
@@ -38,6 +47,7 @@ export class SpendMeter implements ModelProvider {
     row.inputTokens += usage.inputTokens;
     row.outputTokens += usage.outputTokens;
     row.costUsd += costOf(req.model, usage.inputTokens, usage.outputTokens);
+    row.priced = row.priced && !isPlaceholderPrice(req.model);
     this.#rows.set(req.actor, row);
   }
 
@@ -101,6 +111,7 @@ export class SpendMeter implements ModelProvider {
       sum.inputTokens += row.inputTokens;
       sum.outputTokens += row.outputTokens;
       sum.costUsd += row.costUsd;
+      sum.priced = sum.priced && row.priced;
     }
     return sum;
   }

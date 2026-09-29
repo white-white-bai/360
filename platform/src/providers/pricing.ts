@@ -23,8 +23,24 @@ export const PRICES: Record<string, ModelPrice> = {
   cheap: { inputPerMTok: 0.5, outputPerMTok: 2 },
 };
 
+/**
+ * Models whose price somebody actually supplied.
+ *
+ * Kept apart from `PRICES`, because being present in that table is not the same as being
+ * real — `mid` and `cheap` are in there and are placeholders. Without this flag a run
+ * against a model nobody has priced prints a dollar figure computed from invented
+ * numbers, and nothing in the output says so: an estimate presented as a measurement,
+ * which is the failure `usageEstimated` exists to prevent on the token side.
+ */
+const CONFIGURED = new Set<string>();
+
 export function priceFor(model: string): ModelPrice {
   return PRICES[model] ?? FALLBACK_PRICE;
+}
+
+/** True when this model's cost must be read as a placeholder rather than a measurement. */
+export function isPlaceholderPrice(model: string): boolean {
+  return !CONFIGURED.has(model);
 }
 
 /**
@@ -37,6 +53,7 @@ export function priceFor(model: string): ModelPrice {
  */
 export function setPrice(model: string, price: ModelPrice): void {
   PRICES[model] = price;
+  CONFIGURED.add(model);
 }
 
 export function costOf(model: string, inputTokens: number, outputTokens: number): number {
