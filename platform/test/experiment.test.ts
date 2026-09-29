@@ -17,6 +17,9 @@ import {
 const library = loadLibrary();
 const expert = composeExpert(library, "patient-explainer", "analogy-heavy", "time-zones");
 const check = findCheck(expert.domain.checks, "C-gap");
+// The second sitting gets a DIFFERENT asset, so a pass after remediation cannot be
+// recall of the question the learner just failed.
+const retakeCheck = findCheck(expert.domain.checks, "C-overlap");
 const list = parseAssertionList(EXPERIMENT_LIST, "time-zones");
 
 async function trial(condition: "baseline" | "apparatus", profileIndex: number): Promise<TrialResult> {
@@ -27,6 +30,7 @@ async function trial(condition: "baseline" | "apparatus", profileIndex: number):
   return runTrial(condition, provider, {
     expert,
     check,
+    retakeCheck,
     list,
     probeAnswers: profile.probeAnswers,
     terminalAnswer: profile.terminalAnswer,

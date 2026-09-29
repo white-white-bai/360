@@ -107,7 +107,10 @@ export const PROFILES: readonly LearnerProfile[] = [
     // Re-taught and asked again, this learner gets there. The baseline never
     // re-teaches, so the same person stays failed there — which is the difference
     // the experiment is trying to see.
-    retryAnswer: "这个本地时间不存在，因为前跳形成了缺口",
+    //
+    // The answer is to C-overlap, NOT to the question they failed: a retake that
+    // re-asks the same question measures recall of that question.
+    retryAnswer: "这个本地时间出现两次，只给本地时间无法确定是哪一次",
     selfAssessment: 0.8,
   },
   {

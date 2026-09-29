@@ -199,6 +199,13 @@ export interface ApparatusInput {
    * verdict, because there is nothing else to go on.
    */
   retryAnswer?: string;
+  /**
+   * The asset for the second sitting, when it should differ from the first.
+   *
+   * Supplying one is the difference between measuring understanding and measuring
+   * recall of a question the learner has just been shown the answer to.
+   */
+  retakeCheck?: UnderstandingCheck;
   sessionId?: string;
   store?: SessionStore;
   /**
@@ -427,16 +434,23 @@ export async function runApparatusSession(
   // the outcome at all, and the apparatus would be judged on its first attempt no
   // matter how well it corrects — which is a measurement bug, not a design choice.
   //
-  // Caveat kept in view: this re-uses the SAME check, so it measures "did teaching
-  // to the question work" as much as understanding. A second, distinct check would
-  // be stronger, and the assets do not have one yet.
+  // The second sitting uses a different asset when one is supplied (`retakeCheck`),
+  // because re-asking a question the learner has just been shown the answer to
+  // measures recall of that question. Falling back to the same check is a visible
+  // degradation, not a default.
   let verdictAfterRetry: CheckVerdict | null = null;
   if (verdict.verdict === "fail" && input.retryAnswer !== undefined && !off("challenger")) {
     // Gated on the Challenger being on, because the second sitting belongs to the
     // remediation path. Ablating the Challenger ablates the retake too — a baseline
     // that asked the learner again WITHOUT re-teaching them would be measuring a
     // different intervention rather than a cheaper one.
-    verdictAfterRetry = gradeObjectively(check, input.retryAnswer);
+    //
+    // A different asset is used when one is supplied. Re-asking the SAME question
+    // right after showing the learner how to answer it measures recall of that
+    // question, and the number would flatter the apparatus for a reason that has
+    // nothing to do with understanding: the retake must describe a situation the
+    // retry did not.
+    verdictAfterRetry = gradeObjectively(input.retakeCheck ?? check, input.retryAnswer);
     phases.push("retake");
   }
 

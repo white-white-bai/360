@@ -32,10 +32,16 @@ async function main(): Promise<void> {
   const library = loadLibrary();
   const expert = composeExpert(library, "patient-explainer", "analogy-heavy", "time-zones");
   const check = findCheck(expert.domain.checks, "C-gap");
+  // A DIFFERENT asset for the second sitting. Re-asking the question the learner just
+  // failed measures recall of that question, which would flatter the apparatus for a
+  // reason that has nothing to do with understanding.
+  const retakeCheck = findCheck(expert.domain.checks, "C-overlap");
 
   console.log("Ablation experiment (ADR 0001, ADR 0015)");
   console.log(`  expert   ${describeExpert(expert)}`);
   console.log(`  check    ${check.id} — the same hand-authored asset in every trial`);
+  console.log(`  retake   ${retakeCheck.id} — a DIFFERENT situation, so a pass after remediation`);
+  console.log("           cannot be recall of the question that was just failed");
   console.log(`  learners ${PROFILES.map((profile) => profile.name).join(", ")}`);
   console.log("  baseline = the apparatus with semanticVerify, probes and challenger switched off");
 
@@ -70,6 +76,7 @@ async function main(): Promise<void> {
       const result = await runTrial(condition, provider, {
         expert,
         check,
+        retakeCheck,
         list: stimulus,
         probeAnswers: profile.probeAnswers,
         terminalAnswer: profile.terminalAnswer,
@@ -85,11 +92,14 @@ async function main(): Promise<void> {
 
   console.log("\nPER TRIAL");
   console.log(
-    `  ${pad("condition", 12)}${pad("learner", 26)}${pad("result", 9)}${pad("retake", 8)}${right("concerns", 9)}${right("calls", 7)}${right("cost", 10)}`,
+    `  ${pad("condition", 12)}${pad("learner", 26)}${pad("result", 9)}${pad("decided by", 13)}${right("concerns", 9)}${right("calls", 7)}${right("cost", 10)}`,
   );
   for (const { learner, trial } of rows) {
+    // The asset that produced the verdict: the first question, or the retake's. They
+    // are different claims about the learner and must not look the same.
+    const decidedBy = trial.retakeCheckId ?? check.id;
     console.log(
-      `  ${pad(trial.condition, 12)}${pad(learner, 26)}${pad(trial.passed ? "pass" : "FAIL", 9)}${pad(trial.retaken ? "yes" : "no", 8)}${right(String(trial.probeConcerns), 9)}${right(String(trial.calls), 7)}${right(usd(trial.costUsd), 10)}`,
+      `  ${pad(trial.condition, 12)}${pad(learner, 26)}${pad(trial.passed ? "pass" : "FAIL", 9)}${pad(decidedBy, 13)}${right(String(trial.probeConcerns), 9)}${right(String(trial.calls), 7)}${right(usd(trial.costUsd), 10)}`,
     );
   }
 

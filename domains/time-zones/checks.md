@@ -27,6 +27,16 @@ diagnoses:
   - 正常存在 => M-dst-is-just-a-shift
   - 只是偏移量不同 => M-dst-is-just-a-shift
 
+## C-overlap
+
+prompt: 2026-11-01 凌晨，纽约的时钟从 01:59 回拨到 01:00。那么本地时间 "2026-11-01 01:30" 在 America/New_York 是什么？
+expected: 这个本地时间出现两次，只给本地时间无法确定是哪一次
+grounding:
+  - P-gap-and-overlap
+diagnoses:
+  - 正常存在一次 => M-dst-is-just-a-shift
+  - 只是偏移量不同 => M-dst-is-just-a-shift
+
 ## C-offset-vs-zone
 
 prompt: 你拿到字符串 "2026-03-08T02:30:00-05:00"。仅凭这个字符串，你能确定它属于哪个时区吗？

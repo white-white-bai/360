@@ -164,18 +164,65 @@ test("an actor with no script at all is an error", async () => {
 // ------------------------------------------------- the retake, and the record --
 
 test("a failed check is retaken after the retry, so the retry can actually matter", async () => {
+  const retake = findCheck(expert.domain.checks, "C-overlap");
+  const result = await runApparatusSession(new ScriptedProvider(cleanScript()), {
+    expert,
+    check,
+    retakeCheck: retake,
+    probeAnswers: [],
+    terminalAnswer: "不知道，随便猜一个",
+    retryAnswer: retake.expected,
+    sessionId: "retake",
+  });
+
+  assert.equal(result.verdict?.verdict, "fail", "the first sitting still failed");
+  assert.equal(result.verdictAfterRetry?.verdict, "pass", "the second sitting is the one that counts");
+  assert.equal(
+    result.verdictAfterRetry?.checkId,
+    retake.id,
+    "and it was decided by the retake's asset, not by the one they already failed",
+  );
+  assert.ok(result.phases.includes("retake"));
+});
+
+test("answering the FIRST question again does not pass the retake", async () => {
+  // The whole point of a distinct retake asset. Re-asking the same question right
+  // after showing the learner the answer measures recall of it, and recall must not
+  // read as understanding.
+  const retake = findCheck(expert.domain.checks, "C-overlap");
+  const result = await runApparatusSession(new ScriptedProvider(cleanScript()), {
+    expert,
+    check,
+    retakeCheck: retake,
+    probeAnswers: [],
+    terminalAnswer: "不知道，随便猜一个",
+    retryAnswer: check.expected,
+    sessionId: "recall",
+  });
+
+  assert.notEqual(retake.expected, check.expected, "the two assets must not agree by accident");
+  assert.equal(
+    result.verdictAfterRetry?.verdict,
+    "fail",
+    "the first question's answer is not the retake's answer",
+  );
+});
+
+test("with no retake asset supplied, the retake falls back to the same check", async () => {
+  // A visible degradation rather than a silent one: the fallback still works, but the
+  // verdict says which asset produced it, so a pass re-reading the same question
+  // cannot be mistaken for a pass on new material.
   const result = await runApparatusSession(new ScriptedProvider(cleanScript()), {
     expert,
     check,
     probeAnswers: [],
     terminalAnswer: "不知道，随便猜一个",
     retryAnswer: check.expected,
-    sessionId: "retake",
+    sessionId: "no-retake-asset",
   });
 
-  assert.equal(result.verdict?.verdict, "fail", "the first sitting still failed");
-  assert.equal(result.verdictAfterRetry?.verdict, "pass", "the second sitting is the one that counts");
-  assert.ok(result.phases.includes("retake"));
+  assert.equal(result.verdictAfterRetry?.verdict, "pass");
+  assert.equal(result.verdictAfterRetry?.checkId, check.id);
 });
 
 test("without a second answer there is no retake, and the failure stands", async () => {

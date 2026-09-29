@@ -57,6 +57,14 @@ export interface TrialInput {
    */
   retryAnswer?: string;
   /**
+   * The asset for the second sitting, when it should differ from the first.
+   *
+   * Supply one. Without it the retake re-asks the question the learner has just been
+   * shown the answer to, and a higher pass rate says more about the question than
+   * about the teaching.
+   */
+  retakeCheck?: UnderstandingCheck;
+  /**
    * What the learner said they thought they understood, from 0 to 1.
    *
    * ADR 0001 asks for this because fluency produces the illusion of understanding:
@@ -82,6 +90,13 @@ export interface TrialResult {
   passed: boolean;
   /** True when a failed check was retaken, so the result can be read in context. */
   retaken: boolean;
+  /**
+   * The asset that decided the result, when it was a retake.
+   *
+   * Recorded so a pass after remediation can never be confused with a pass on the
+   * first question — they are different claims about the learner.
+   */
+  retakeCheckId: string | null;
   diagnosis: string | null;
   probeConcerns: number;
   challengeFired: boolean;
@@ -103,6 +118,7 @@ export async function runTrial(
     probeAnswers: input.probeAnswers,
     terminalAnswer: input.terminalAnswer,
     retryAnswer: input.retryAnswer,
+    retakeCheck: input.retakeCheck,
     list: input.list,
     disable: CONDITION_ABLATIONS[condition],
     sessionId: `trial-${condition}`,
@@ -119,6 +135,7 @@ export async function runTrial(
     list: result.list,
     passed,
     retaken: result.verdictAfterRetry !== null,
+    retakeCheckId: result.verdictAfterRetry === null ? null : (input.retakeCheck ?? input.check).id,
     diagnosis: final?.diagnosis?.misconceptionId ?? null,
     probeConcerns: result.outcomes.filter((outcome) => outcome.concern).length,
     challengeFired: result.challenge.fired,
