@@ -37,6 +37,18 @@ diagnoses:
   - 正常存在一次 => M-dst-is-just-a-shift
   - 只是偏移量不同 => M-dst-is-just-a-shift
 
+## T-fixed-offset
+
+prompt: 有人写了一个函数，把全年所有"纽约本地时间"都按固定偏移量 -05:00 转成时刻。这个函数会在什么时候出错，为什么？
+expected: 全年都按 -05:00 解释，忽略了偏移量随季节变化；切换日会出现不存在的本地时间（被当成有效时间）和重复出现的本地时间（只能取到其中一次），两个方向都错
+grounding:
+  - P-zone-is-a-set-of-rules
+  - P-gap-and-overlap
+diagnoses:
+  - 固定偏移量就代表那个时区 => M-zone-is-an-offset
+  - 只要夏令时当天特殊处理 => M-dst-is-just-a-shift
+  - 不会有问题 => M-zone-is-an-offset
+
 ## C-offset-vs-zone
 
 prompt: 你拿到字符串 "2026-03-08T02:30:00-05:00"。仅凭这个字符串，你能确定它属于哪个时区吗？

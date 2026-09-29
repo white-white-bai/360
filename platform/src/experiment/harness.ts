@@ -4,6 +4,8 @@ import type { Expert } from "../experts/types.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import type { ApparatusFeature } from "../session/apparatus.ts";
 import { ALL_FEATURES, runApparatusSession } from "../session/apparatus.ts";
+import type { FollowUp } from "../session/measure.ts";
+import { MEANINGFUL_RETENTION_HOURS, measureFollowUp } from "../session/measure.ts";
 
 /**
  * The ablation experiment (ADR 0001, ADR 0015).
@@ -65,6 +67,28 @@ export interface TrialInput {
    */
   retakeCheck?: UnderstandingCheck;
   /**
+   * The asset for the TRANSFER measurement (ADR 0001) — a situation the explanation
+   * never used.
+   *
+   * Retention re-uses the terminal check, because "did it stick" is the same
+   * question. Transfer must not: a question the learner was just taught the answer to
+   * measures recall, and recall is not transfer.
+   */
+  transferCheck?: UnderstandingCheck;
+  /** The follow-up sitting. Omitted means it never happens. */
+  followUp?: {
+    /**
+     * Hours between teaching and the follow-up.
+     *
+     * Simulated in an experiment that runs in one process — which is exactly why every
+     * measurement records its own elapsed time. A retention number must be able to
+     * show what it was measured over.
+     */
+    afterHours: number;
+    retentionAnswer?: string;
+    transferAnswer?: string;
+  };
+  /**
    * What the learner said they thought they understood, from 0 to 1.
    *
    * ADR 0001 asks for this because fluency produces the illusion of understanding:
@@ -105,6 +129,29 @@ export interface TrialResult {
   selfAssessment: number | null;
   /** self-assessment minus the measured result. Positive means they felt better than they did. */
   illusionGap: number | null;
+  /**
+   * ADR 0001's two secondary measures, or null when the follow-up never happened.
+   *
+   * They matter more than they look: a pass rate measured minutes after teaching is a
+   * statement about the lesson, and these are statements about the learner.
+   */
+  retention: FollowUpResult | null;
+  transfer: FollowUpResult | null;
+}
+
+export interface FollowUpResult {
+  passed: boolean;
+  elapsedHours: number;
+  /** False when too little time passed for the name to be honest. */
+  meaningful: boolean;
+}
+
+function asFollowUpResult(followUp: FollowUp): FollowUpResult {
+  return {
+    passed: followUp.record.verdict === "pass",
+    elapsedHours: followUp.record.elapsedHours,
+    meaningful: followUp.meaningful,
+  };
 }
 
 export async function runTrial(
@@ -127,6 +174,34 @@ export async function runTrial(
   // The SECOND sitting decides, because passing is the session's end condition.
   const final = result.verdictAfterRetry ?? result.verdict;
   const passed = final?.verdict === "pass";
+  // ADR 0001's secondary measures, taken on the same learner afterwards.
+  let retention: FollowUpResult | null = null;
+  let transfer: FollowUpResult | null = null;
+  if (input.followUp !== undefined) {
+    const startedAt = result.log.startedAt === null ? Number.NaN : Date.parse(result.log.startedAt);
+    if (Number.isNaN(startedAt)) {
+      throw new Error("the session log has no usable start time, so it cannot be followed up");
+    }
+    // The clock is MOVED rather than waited on. An experiment that spent a day per
+    // trial would not be run at all, and every measurement records the elapsed time it
+    // was taken over, so a simulated one is visible in the result rather than implied.
+    const now = new Date(startedAt + input.followUp.afterHours * 3_600_000);
+
+    // An absent answer means they did not come back, which is NOT the same as coming
+    // back and getting it wrong. Scoring silence as failure would make the rates
+    // measure attendance.
+    if (input.followUp.retentionAnswer !== undefined) {
+      retention = asFollowUpResult(
+        measureFollowUp(result.log, input.check, "retention", input.followUp.retentionAnswer, now),
+      );
+    }
+    if (input.transferCheck !== undefined && input.followUp.transferAnswer !== undefined) {
+      transfer = asFollowUpResult(
+        measureFollowUp(result.log, input.transferCheck, "transfer", input.followUp.transferAnswer, now),
+      );
+    }
+  }
+
   const selfAssessment = input.selfAssessment ?? null;
   return {
     condition,
@@ -143,6 +218,8 @@ export async function runTrial(
     costUsd: result.usage.costUsd,
     selfAssessment,
     illusionGap: selfAssessment === null ? null : selfAssessment - (passed ? 1 : 0),
+    retention,
+    transfer,
   };
 }
 
@@ -158,6 +235,18 @@ export interface ConditionSummary {
   challenges: number;
   /** Mean of the per-trial illusion gaps, or null when nobody reported one. */
   meanIllusionGap: number | null;
+  /**
+   * ADR 0001's two secondary measures.
+   *
+   * Rates over the trials that actually had a follow-up, not over all trials — a
+   * condition where nobody came back should say "no data", not "0%".
+   */
+  retentionRate: number | null;
+  transferRate: number | null;
+  /** Mean elapsed hours the follow-ups were measured over, or null when there were none. */
+  meanFollowUpHours: number | null;
+  /** True when any follow-up was taken too soon for its name to be honest. */
+  followUpTooSoon: boolean;
 }
 
 export function summarise(condition: Condition, trials: readonly TrialResult[]): ConditionSummary {
@@ -165,6 +254,16 @@ export function summarise(condition: Condition, trials: readonly TrialResult[]):
   const gaps = mine.map((trial) => trial.illusionGap).filter((gap): gap is number => gap !== null);
   const mean = (values: number[]): number =>
     values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
+
+  const rateOf = (pick: (trial: TrialResult) => FollowUpResult | null): number | null => {
+    const measured = mine.map(pick).filter((result): result is FollowUpResult => result !== null);
+    if (measured.length === 0) return null;
+    return measured.filter((result) => result.passed).length / measured.length;
+  };
+
+  const followUps = mine
+    .flatMap((trial) => [trial.retention, trial.transfer])
+    .filter((result): result is FollowUpResult => result !== null);
 
   return {
     condition,
@@ -177,6 +276,10 @@ export function summarise(condition: Condition, trials: readonly TrialResult[]):
     probeConcerns: mine.reduce((sum, trial) => sum + trial.probeConcerns, 0),
     challenges: mine.filter((trial) => trial.challengeFired).length,
     meanIllusionGap: gaps.length === 0 ? null : mean(gaps),
+    retentionRate: rateOf((trial) => trial.retention),
+    transferRate: rateOf((trial) => trial.transfer),
+    meanFollowUpHours: followUps.length === 0 ? null : mean(followUps.map((result) => result.elapsedHours)),
+    followUpTooSoon: followUps.some((result) => !result.meaningful),
   };
 }
 
@@ -193,26 +296,86 @@ export interface Comparison {
    */
   verdict: "apparatus-better" | "no-difference" | "baseline-better" | "inconclusive";
   reason: string;
+  /**
+   * What the secondary measures say about the primary one, or null when they agree.
+   *
+   * Kept separate from `reason` because the two answer different questions: the
+   * verdict says which condition passed more, the caveat says whether passing more
+   * meant learning more.
+   */
+  caveat: string | null;
+}
+
+/**
+ * Read ADR 0001's secondary measures against the primary one.
+ *
+ * The terminal check can improve while retention gets worse, and that combination
+ * means the apparatus produced fluency rather than learning — the exact illusion ADR
+ * 0001 chose self-assessment to detect. Reporting only the pass rate would call that a
+ * win.
+ */
+function followUpCaveat(baseline: ConditionSummary, apparatus: ConditionSummary, delta: number): string | null {
+  const notes: string[] = [];
+
+  if (baseline.followUpTooSoon || apparatus.followUpTooSoon) {
+    const hours = apparatus.meanFollowUpHours ?? baseline.meanFollowUpHours ?? 0;
+    notes.push(
+      `the follow-ups were taken over about ${hours.toFixed(1)} hours. Below ${MEANINGFUL_RETENTION_HOURS} ` +
+        'hours a "retention" measurement is the terminal check again under a different name',
+    );
+  }
+
+  const regressed = (label: string, before: number | null, after: number | null): void => {
+    if (before === null || after === null || after >= before - 0.0001) return;
+    notes.push(
+      `${label} went DOWN (${(before * 100).toFixed(0)}% to ${(after * 100).toFixed(0)}%) while the terminal ` +
+        "check went up — that is fluency, not learning",
+    );
+  };
+  regressed("retention", baseline.retentionRate, apparatus.retentionRate);
+  regressed("transfer", baseline.transferRate, apparatus.transferRate);
+
+  // The quieter and more important case: the terminal check improved and the measure
+  // that matters did not move. "The apparatus helped, and a day later nobody could
+  // tell" is not a win, and the pass rate alone cannot say so.
+  const didNotCarry = (label: string, before: number | null, after: number | null): void => {
+    if (before === null || after === null || delta <= 0 || after > before + 0.0001) return;
+    notes.push(
+      `${label} did not move (${(before * 100).toFixed(0)}% to ${(after * 100).toFixed(0)}%), so the ` +
+        "terminal-check advantage did not carry past the session",
+    );
+  };
+  didNotCarry("retention", baseline.retentionRate, apparatus.retentionRate);
+  didNotCarry("transfer", baseline.transferRate, apparatus.transferRate);
+
+  if (baseline.retentionRate === null && apparatus.retentionRate === null) {
+    notes.push("no follow-up was taken, so nothing here says whether any of it lasted");
+  }
+
+  return notes.length === 0 ? null : notes.join("; ");
 }
 
 export function compare(trials: readonly TrialResult[], minTrialsPerCondition = 3): Comparison {
   const baseline = summarise("baseline", trials);
   const apparatus = summarise("apparatus", trials);
+  const delta = apparatus.passRate - baseline.passRate;
+  const caveat = followUpCaveat(baseline, apparatus, delta);
 
   if (baseline.trials < minTrialsPerCondition || apparatus.trials < minTrialsPerCondition) {
     return {
       baseline,
       apparatus,
+      caveat,
       verdict: "inconclusive",
       reason: `fewer than ${minTrialsPerCondition} trials in a condition — not enough to say anything`,
     };
   }
 
-  const delta = apparatus.passRate - baseline.passRate;
   if (Math.abs(delta) < 0.0001) {
     return {
       baseline,
       apparatus,
+      caveat,
       verdict: "no-difference",
       reason:
         "the apparatus did not change the pass rate. Per ADR 0015, a piece of apparatus that shows no " +
@@ -223,6 +386,7 @@ export function compare(trials: readonly TrialResult[], minTrialsPerCondition = 
   return {
     baseline,
     apparatus,
+    caveat,
     verdict: delta > 0 ? "apparatus-better" : "baseline-better",
     reason:
       delta > 0

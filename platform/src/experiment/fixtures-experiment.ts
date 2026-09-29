@@ -85,6 +85,15 @@ export interface LearnerProfile {
    * help, and a profile list without it would flatter the apparatus.
    */
   retryAnswer?: string;
+  /**
+   * What they say when asked again a day later, and when asked to use it somewhere new.
+   *
+   * Omitted means they never came back — a real outcome that must not be scored as a
+   * failure. ADR 0001's two secondary measures: a pass rate measured minutes after
+   * teaching is a statement about the lesson, and these are statements about the learner.
+   */
+  retentionAnswer?: string;
+  transferAnswer?: string;
   /** What the learner said they felt they understood, 0-1. */
   selfAssessment: number;
 }
@@ -98,6 +107,12 @@ export const PROFILES: readonly LearnerProfile[] = [
     name: "gets it",
     probeAnswers: ["时区是规则，偏移量是某一瞬间的结果"],
     terminalAnswer: "这个本地时间不存在，因为前跳形成了缺口",
+    // The fact is still there a day later. The ABILITY TO USE IT is not: asked what a
+    // fixed offset does to a year of timestamps, they fall back on the very model the
+    // lesson was about. Holding a fact is not applying it, and that gap is what
+    // transfer measures — which is why a terminal check alone can look like a win.
+    retentionAnswer: "这个本地时间不存在，因为前跳形成了缺口",
+    transferAnswer: "固定偏移量就代表那个时区，这个函数不会有问题",
     selfAssessment: 0.9,
   },
   {
@@ -111,6 +126,10 @@ export const PROFILES: readonly LearnerProfile[] = [
     // The answer is to C-overlap, NOT to the question they failed: a retake that
     // re-asks the same question measures recall of that question.
     retryAnswer: "这个本地时间出现两次，只给本地时间无法确定是哪一次",
+    // And the fix did not last. A day later the original answer is back — exactly the
+    // case a terminal check would have reported as a win for the apparatus.
+    retentionAnswer: "这个本地时间正常存在，只是偏移量不同",
+    transferAnswer: "不会有问题",
     selfAssessment: 0.8,
   },
   {
@@ -119,6 +138,9 @@ export const PROFILES: readonly LearnerProfile[] = [
     terminalAnswer: "我猜是下午两点半左右",
     // Deliberately no retryAnswer: this one stops. A profile list where everyone
     // comes back would flatter the apparatus.
+    //
+    // No follow-up answers either: they never came back. That has to read as "no
+    // data", not as a failure, or the rates would be measuring attendance.
     selfAssessment: 0.4,
   },
 ];

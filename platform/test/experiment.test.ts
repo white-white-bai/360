@@ -20,6 +20,8 @@ const check = findCheck(expert.domain.checks, "C-gap");
 // The second sitting gets a DIFFERENT asset, so a pass after remediation cannot be
 // recall of the question the learner just failed.
 const retakeCheck = findCheck(expert.domain.checks, "C-overlap");
+// And a THIRD asset for the transfer measurement: a situation the lesson never used.
+const transferCheck = findCheck(expert.domain.checks, "T-fixed-offset");
 const list = parseAssertionList(EXPERIMENT_LIST, "time-zones");
 
 async function trial(condition: "baseline" | "apparatus", profileIndex: number): Promise<TrialResult> {
@@ -35,9 +37,55 @@ async function trial(condition: "baseline" | "apparatus", profileIndex: number):
     probeAnswers: profile.probeAnswers,
     terminalAnswer: profile.terminalAnswer,
     retryAnswer: profile.retryAnswer,
+    transferCheck,
+    followUp: {
+      afterHours: 24,
+      retentionAnswer: profile.retentionAnswer,
+      transferAnswer: profile.transferAnswer,
+    },
     selfAssessment: profile.selfAssessment,
   });
 }
+
+test("a pass that does not survive the day is not reported as a win", async () => {
+  // ADR 0001's secondary measures, and the reason they exist: the apparatus improves
+  // the terminal check while retention does not move. Reporting only the pass rate
+  // would call that learning, and the caveat is what stops it.
+  const trials: TrialResult[] = [];
+  for (let index = 0; index < PROFILES.length; index += 1) {
+    trials.push(await trial("baseline", index));
+    trials.push(await trial("apparatus", index));
+  }
+
+  const result = compare(trials, 3);
+  assert.equal(result.verdict, "apparatus-better");
+  assert.equal(result.apparatus.retentionRate, result.baseline.retentionRate);
+  assert.ok(result.caveat !== null, "a terminal-check win that does not carry must be flagged");
+  assert.match(result.caveat as string, /did not carry/);
+});
+
+test("a learner who never came back is no data, not a failure", async () => {
+  const result = await trial("apparatus", 2);
+  assert.equal(result.retention, null, "silence must not be scored as a wrong answer");
+  assert.equal(result.transfer, null);
+});
+
+test("each follow-up records the time it was measured over", async () => {
+  const result = await trial("apparatus", 0);
+
+  assert.equal(result.retention?.elapsedHours, 24);
+  assert.equal(result.retention?.meaningful, true);
+  assert.equal(result.retention?.passed, true, "the fact survived the day");
+  assert.equal(result.transfer?.passed, false, "the ability to use it did not");
+});
+
+test("reattempting the terminal check later is not transfer", async () => {
+  // The two measures differ by asset, not by machinery. If transfer used the terminal
+  // check it would be retention wearing its name.
+  const result = await trial("apparatus", 0);
+  assert.notEqual(result.retakeCheckId, "T-fixed-offset");
+  assert.equal(result.transfer !== null && result.retention !== null, true);
+});
 
 test("the baseline is the apparatus with every piece switched off", async () => {
   const baseline = await trial("baseline", 0);

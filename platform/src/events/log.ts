@@ -24,15 +24,42 @@ export interface AnswerChunk {
   text: string;
 }
 
+/**
+ * A measurement taken after the session, on the same learner (ADR 0001).
+ *
+ * Two kinds, and the difference is the asset, not the machinery. **Retention** asks
+ * the same question again later: did it stick. **Transfer** asks a different question
+ * covering the same claim: can they use it somewhere new. ADR 0001 makes both
+ * secondary measures, and says they matter more than they look — a pass rate measured
+ * minutes after teaching is a statement about the lesson, and these are statements
+ * about the learner.
+ *
+ * `elapsedHours` is recorded rather than assumed. A "retention" measurement taken
+ * minutes later is the terminal check wearing a different name, and the only thing
+ * that distinguishes them is this number.
+ */
+export interface FollowUpRecord {
+  at: number;
+  kind: "retention" | "transfer";
+  checkId: string;
+  /** The learner's answer. Their own words, so it is as sensitive as the rest. */
+  answer: string;
+  verdict: "pass" | "fail";
+  elapsedHours: number;
+}
+
 export interface SessionLog {
   sessionId: string;
+  /** ISO 8601, or null for a log written before this was recorded. */
+  startedAt: string | null;
   narration: NarrationChunk[];
   events: BlackboardEvent[];
   answers: AnswerChunk[];
+  followUps: FollowUpRecord[];
 }
 
-export function emptyLog(sessionId: string): SessionLog {
-  return { sessionId, narration: [], events: [], answers: [] };
+export function emptyLog(sessionId: string, startedAt: string | null = new Date().toISOString()): SessionLog {
+  return { sessionId, startedAt, narration: [], events: [], answers: [], followUps: [] };
 }
 
 /** Next free position on the shared timeline. */
@@ -41,6 +68,7 @@ export function nextAt(log: SessionLog): number {
   for (const chunk of log.narration) if (chunk.at > max) max = chunk.at;
   for (const event of log.events) if (event.at > max) max = event.at;
   for (const answer of log.answers) if (answer.at > max) max = answer.at;
+  for (const followUp of log.followUps) if (followUp.at > max) max = followUp.at;
   return max + 1;
 }
 
@@ -58,6 +86,13 @@ export function appendAnswer(log: SessionLog, answer: AnswerChunk): SessionLog {
     throw new Error("an answer must name the probe it answers");
   }
   return { ...log, answers: [...log.answers, answer] };
+}
+
+export function appendFollowUp(log: SessionLog, followUp: FollowUpRecord): SessionLog {
+  if (followUp.checkId.trim() === "") {
+    throw new Error("a follow-up must name the check it was graded against");
+  }
+  return { ...log, followUps: [...log.followUps, followUp] };
 }
 
 export function serializeLog(log: SessionLog): string {
@@ -107,11 +142,18 @@ export function deserializeLog(text: string): SessionLog {
   const answers = Array.isArray(candidate.answers) ? (candidate.answers as unknown[]) : [];
   for (const answer of answers) assertAnswer(answer);
 
+  const followUps = Array.isArray(candidate.followUps) ? (candidate.followUps as unknown[]) : [];
+
   return {
     sessionId: candidate.sessionId,
+    // Null rather than "now": a log that does not say when it happened must not be
+    // given a start time by the act of reading it, or retention would be measured
+    // from the moment of inspection.
+    startedAt: typeof candidate.startedAt === "string" ? candidate.startedAt : null,
     narration,
     events,
     answers: answers as AnswerChunk[],
+    followUps: followUps as FollowUpRecord[],
   };
 }
 
