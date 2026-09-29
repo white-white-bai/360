@@ -10,7 +10,8 @@ import { appendAnswer, emptyLog, nextAt } from "../events/log.ts";
 import type { LedgerRow } from "../providers/meter.ts";
 import { SpendMeter } from "../providers/meter.ts";
 import { runTurn } from "./stream.ts";
-import type { ModelProvider } from "../providers/types.ts";
+import type { CompletionRequest, ModelProvider } from "../providers/types.ts";
+import { ModelReplyUnusable, ReplyBudget, retryNote } from "./retry.ts";
 import type { Surface } from "../render/render.ts";
 import { render } from "../render/render.ts";
 import type { Probe, ProbeOutcome, SemanticVerdict } from "./contracts.ts";
@@ -227,6 +228,14 @@ export interface ApparatusInput {
    */
   retakeCheck?: UnderstandingCheck;
   /**
+   * Where retries are counted, when the caller wants the number.
+   *
+   * Omitted means one is created and the count is only reported on the result. Supplied
+   * means the caller can read it even when the session throws — which is the case that
+   * matters, because a trial that died is exactly the one whose retry count is interesting.
+   */
+  retryBudget?: ReplyBudget;
+  /**
    * Called after each step lands, so a live board can redraw.
    *
    * The session neither knows nor cares whether anyone is watching. This is how the
@@ -271,6 +280,13 @@ export interface ApparatusResult {
    * and it has to be, because every entry must also be reachable from a check.
    */
   unlistedConcerns: UnlistedConcern[];
+  /**
+   * Extra calls spent on replies that could not be used, across the whole session.
+   *
+   * Reported rather than folded into `usage`, because it is a tax the model levies and not
+   * work the design asked for — and a reader comparing two conditions needs to see it.
+   */
+  retries: number;
   challenge: { fired: boolean; triggers: string[] };
   /** The first sitting. */
   verdict: CheckVerdict | null;
@@ -321,6 +337,10 @@ export async function runApparatusSession(
   const disabled = [...(input.disable ?? [])];
   const off = (feature: ApparatusFeature): boolean => disabled.includes(feature);
   const phases: string[] = [];
+  // The retry budget is supplied by the caller when the caller needs to know how much a
+  // trial spent on unusable replies — which the experiment does, because a design that
+  // makes more calls is more exposed to this and that exposure belongs in its cost.
+  const budget = input.retryBudget ?? new ReplyBudget();
 
   const sessionId = input.sessionId ?? `apparatus-${expert.domain.id}`;
 
@@ -329,14 +349,18 @@ export async function runApparatusSession(
   let list = input.list;
   const listInjected = list !== undefined;
   if (list === undefined) {
-    const listTurn = await meter.complete({
-      actor: ACTOR.explainer,
-      model: MODEL,
-      system: listPrompt(expert),
-      input: "State the claims you intend to teach.",
-    });
+    list = await ask(
+      meter,
+      {
+        actor: ACTOR.explainer,
+        model: MODEL,
+        system: listPrompt(expert),
+        input: "State the claims you intend to teach.",
+      },
+      (text) => parseAssertionList(text, expert.domain.id),
+      budget,
+    );
     phases.push("assertion-list");
-    list = parseAssertionList(listTurn.text, expert.domain.id);
   }
 
   // 2 — the kernel's structural check. Always on: it can only abort, never teach.
@@ -353,14 +377,18 @@ export async function runApparatusSession(
   // 3 — the independent semantic check.
   let semantic: SemanticVerdict[] = [];
   if (!off("semanticVerify")) {
-    const semanticTurn = await meter.complete({
-      actor: ACTOR.semanticVerifier,
-      model: MODEL,
-      system: verifyPrompt(expert),
-      input: JSON.stringify({ assertions: list.assertions }),
-    });
+    semantic = await ask(
+      meter,
+      {
+        actor: ACTOR.semanticVerifier,
+        model: MODEL,
+        system: verifyPrompt(expert),
+        input: JSON.stringify({ assertions: list.assertions }),
+      },
+      parseSemanticVerdicts,
+      budget,
+    );
     phases.push("semantic-verify");
-    semantic = parseSemanticVerdicts(semanticTurn.text);
 
     const unsupported = semantic.filter((verdict) => !verdict.ok);
     if (unsupported.length > 0) {
@@ -376,6 +404,7 @@ export async function runApparatusSession(
         probes: [],
         outcomes: [],
         unlistedConcerns: [],
+        retries: budget.retries,
         challenge: { fired: false, triggers: [] },
         verdict: null,
         verdictAfterRetry: null,
@@ -393,14 +422,18 @@ export async function runApparatusSession(
   // 4 — probes, authored by someone who is not the explainer.
   let probes: Probe[] = [];
   if (!off("probes")) {
-    const probeTurn = await meter.complete({
-      actor: ACTOR.probeAuthor,
-      model: MODEL,
-      system: probePrompt(expert, list),
-      input: "Write the probes.",
-    });
+    probes = await ask(
+      meter,
+      {
+        actor: ACTOR.probeAuthor,
+        model: MODEL,
+        system: probePrompt(expert, list),
+        input: "Write the probes.",
+      },
+      parseProbes,
+      budget,
+    );
     phases.push("probe-author");
-    probes = parseProbes(probeTurn.text);
   }
 
   // 5 — the narration, with the probes placed inside it.
@@ -418,7 +451,7 @@ export async function runApparatusSession(
     },
     emptyLog(sessionId),
     "lead-explainer",
-    { prepare: (step) => speakOne(step, probes), onStep: input.onStep },
+    { prepare: (step) => speakOne(step, probes), onStep: input.onStep, retry: budget },
   );
   phases.push("narration");
   let log = narration.log;
@@ -433,13 +466,19 @@ export async function runApparatusSession(
     for (const [index, probe] of probes.entries()) {
       const answer = input.probeAnswers[index];
       if (answer === undefined) continue;
-      const outcomeTurn = await meter.complete({
-        actor: ACTOR.probeEvaluator,
-        model: MODEL,
-        system: PROBE_EVALUATOR_SYSTEM(expert),
-        input: JSON.stringify({ probe: probe.prompt, answer }),
-      });
-      outcomes.push(parseProbeOutcome(outcomeTurn.text, probe.id));
+      outcomes.push(
+        await ask(
+          meter,
+          {
+            actor: ACTOR.probeEvaluator,
+            model: MODEL,
+            system: PROBE_EVALUATOR_SYSTEM(expert),
+            input: JSON.stringify({ probe: probe.prompt, answer }),
+          },
+          (text) => parseProbeOutcome(text, probe.id),
+          budget,
+        ),
+      );
       // The learner's own words go into the log, which ADR 0002 already treats as a
       // sensitive record. Keeping them anywhere else would give the most sensitive
       // half of that record a different lifecycle and a different deletion
@@ -482,7 +521,7 @@ export async function runApparatusSession(
       },
       log,
       "challenger",
-      { onStep: input.onStep },
+      { onStep: input.onStep, retry: budget },
     );
     phases.push("challenger");
     log = challenge.log;
@@ -498,7 +537,7 @@ export async function runApparatusSession(
       },
       log,
       "lead-explainer",
-      { onStep: input.onStep },
+      { onStep: input.onStep, retry: budget },
     );
     phases.push("re-teach");
     log = retry.log;
@@ -547,6 +586,7 @@ export async function runApparatusSession(
     probes,
     outcomes,
     unlistedConcerns,
+    retries: budget.retries,
     challenge: { fired: triggers.length > 0 && !off("challenger"), triggers },
     verdict,
     verdictAfterRetry,
@@ -558,6 +598,42 @@ export async function runApparatusSession(
     phases,
     disabled,
   };
+}
+
+/**
+ * One actor call, with a single retry when the reply cannot be used.
+ *
+ * ADR 0001's owner decided the policy after three live runs each died on a different model
+ * slip: retry once, count every retry, and let the harness report a trial that still fails
+ * as incomplete rather than as a pass or a failure.
+ *
+ * Only a reply that could not be INTERPRETED is retried. A transport failure has its own
+ * error and its own causes, and hiding an outage behind a second attempt would turn "the
+ * provider was down" into "the model was sloppy" — which is the wrong lesson to learn from
+ * a failed run.
+ */
+async function ask<T>(
+  meter: SpendMeter,
+  request: CompletionRequest,
+  parse: (text: string) => T,
+  budget: ReplyBudget,
+): Promise<T> {
+  const first = await meter.complete(request);
+  try {
+    return parse(first.text);
+  } catch (firstError) {
+    const reason = firstError instanceof Error ? firstError.message : String(firstError);
+    budget.spend();
+    const second = await meter.complete({ ...request, input: request.input + retryNote(reason) });
+    try {
+      return parse(second.text);
+    } catch (secondError) {
+      const again = secondError instanceof Error ? secondError.message : String(secondError);
+      throw new ModelReplyUnusable(
+        `\`${request.actor}\` returned an unusable reply twice.\nFirst: ${reason}\nSecond: ${again}`,
+      );
+    }
+  }
 }
 
 /** The same substitution, for one step at a time — the shape a streamed turn needs. */

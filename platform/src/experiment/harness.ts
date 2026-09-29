@@ -6,6 +6,7 @@ import type { ApparatusFeature } from "../session/apparatus.ts";
 import { ALL_FEATURES, runApparatusSession } from "../session/apparatus.ts";
 import type { FollowUp } from "../session/measure.ts";
 import { MEANINGFUL_RETENTION_HOURS, measureFollowUp } from "../session/measure.ts";
+import { ModelReplyUnusable, ReplyBudget } from "../session/retry.ts";
 
 /**
  * The ablation experiment (ADR 0001, ADR 0015).
@@ -109,8 +110,25 @@ export interface TrialResult {
    * reason that has nothing to do with the apparatus.
    */
   listInjected: boolean;
-  /** The claims that were taught — the injected stimulus, or a generated one. */
-  list: AssertionList;
+  /** The claims that were taught, when the trial got far enough to have any. */
+  list: AssertionList | undefined;
+  /**
+   * False when the trial could not be run at all — an unusable reply, twice.
+   *
+   * Not a failure. Counting it as one turns the model's typing into a statement about the
+   * learner, and counting it as a pass would be worse. It is excluded from the pass rate and
+   * reported on its own, which is what makes a design that completes fewer trials visibly
+   * worse rather than merely noisier.
+   *
+   * `calls` and `costUsd` are zero for these, and that is a GAP rather than a measurement:
+   * the session threw before reporting its ledger, so the calls the failed attempt really
+   * spent are not in this number.
+   */
+  completed: boolean;
+  /** Why it could not be run, when it could not be. */
+  incompleteReason: string | null;
+  /** Extra calls spent on replies that could not be used. */
+  retries: number;
   passed: boolean;
   /** True when a failed check was retaken, so the result can be read in context. */
   retaken: boolean;
@@ -167,7 +185,50 @@ export async function runTrial(
   provider: ModelProvider,
   input: TrialInput,
 ): Promise<TrialResult> {
+  // (a)+(c), the owner's decision taken on ADR 0001's behalf: retry once, count every retry,
+  // and report a trial that still fails as INCOMPLETE. A live model slips — three live runs
+  // each died on a different slip — and one slip used to destroy everything measured so far.
+  const budget = new ReplyBudget();
+  try {
+    return await runCompletedTrial(condition, provider, input, budget);
+  } catch (error) {
+    // Only an unusable REPLY makes a trial incomplete. A transport failure, a bug in the
+    // kernel or a violated invariant still aborts the run, because turning those into
+    // "incomplete" would hide a real fault behind a category that looks like bad luck.
+    if (!(error instanceof ModelReplyUnusable)) throw error;
+    return {
+      condition,
+      disabled: CONDITION_ABLATIONS[condition],
+      listInjected: input.list !== undefined,
+      list: input.list,
+      completed: false,
+      incompleteReason: error.message,
+      retries: budget.retries,
+      passed: false,
+      retaken: false,
+      retakeCheckId: null,
+      diagnosis: null,
+      probeConcerns: 0,
+      challengeFired: false,
+      calls: 0,
+      costUsd: 0,
+      costIsPlaceholder: false,
+      selfAssessment: input.selfAssessment ?? null,
+      illusionGap: null,
+      retention: null,
+      transfer: null,
+    };
+  }
+}
+
+async function runCompletedTrial(
+  condition: Condition,
+  provider: ModelProvider,
+  input: TrialInput,
+  budget: ReplyBudget,
+): Promise<TrialResult> {
   const result = await runApparatusSession(provider, {
+    retryBudget: budget,
     expert: input.expert,
     check: input.check,
     probeAnswers: input.probeAnswers,
@@ -222,6 +283,9 @@ export async function runTrial(
     diagnosis: final?.diagnosis?.misconceptionId ?? null,
     probeConcerns: result.outcomes.filter((outcome) => outcome.concern).length,
     challengeFired: result.challenge.fired,
+    completed: true,
+    incompleteReason: null,
+    retries: result.retries,
     calls: result.usage.calls,
     costUsd: result.usage.costUsd,
     costIsPlaceholder: !result.usage.priced,
@@ -236,8 +300,20 @@ export interface ConditionSummary {
   condition: Condition;
   disabled: readonly ApparatusFeature[];
   trials: number;
+  /**
+   * Trials that could not be run: an unusable reply, twice.
+   *
+   * Its own number, and its own column in the report. A condition with more of these is a
+   * worse condition — it is more exposed to the model slipping — and folding them into the
+   * pass rate would hide exactly that.
+   */
+  incomplete: number;
+  /** Trials that ran, and are therefore the denominator of `passRate`. */
+  completed: number;
   passed: number;
   passRate: number;
+  /** Extra calls spent on unusable replies, summed over the condition. */
+  retries: number;
   meanCalls: number;
   meanCostUsd: number;
   probeConcerns: number;
@@ -260,17 +336,21 @@ export interface ConditionSummary {
 
 export function summarise(condition: Condition, trials: readonly TrialResult[]): ConditionSummary {
   const mine = trials.filter((trial) => trial.condition === condition);
-  const gaps = mine.map((trial) => trial.illusionGap).filter((gap): gap is number => gap !== null);
+  // Everything below is measured over the trials that RAN. An incomplete trial has no
+  // measurement in it — its zeroes are gaps, not observations — so averaging them in would
+  // make a condition look cheaper and worse-measured than the thing it was asked to do.
+  const ran = mine.filter((trial) => trial.completed);
+  const gaps = ran.map((trial) => trial.illusionGap).filter((gap): gap is number => gap !== null);
   const mean = (values: number[]): number =>
     values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
 
   const rateOf = (pick: (trial: TrialResult) => FollowUpResult | null): number | null => {
-    const measured = mine.map(pick).filter((result): result is FollowUpResult => result !== null);
+    const measured = ran.map(pick).filter((result): result is FollowUpResult => result !== null);
     if (measured.length === 0) return null;
     return measured.filter((result) => result.passed).length / measured.length;
   };
 
-  const followUps = mine
+  const followUps = ran
     .flatMap((trial) => [trial.retention, trial.transfer])
     .filter((result): result is FollowUpResult => result !== null);
 
@@ -278,12 +358,15 @@ export function summarise(condition: Condition, trials: readonly TrialResult[]):
     condition,
     disabled: CONDITION_ABLATIONS[condition],
     trials: mine.length,
-    passed: mine.filter((trial) => trial.passed).length,
-    passRate: mine.length === 0 ? 0 : mine.filter((trial) => trial.passed).length / mine.length,
-    meanCalls: mean(mine.map((trial) => trial.calls)),
-    meanCostUsd: mean(mine.map((trial) => trial.costUsd)),
-    probeConcerns: mine.reduce((sum, trial) => sum + trial.probeConcerns, 0),
-    challenges: mine.filter((trial) => trial.challengeFired).length,
+    incomplete: mine.length - ran.length,
+    completed: ran.length,
+    passed: ran.filter((trial) => trial.passed).length,
+    passRate: ran.length === 0 ? 0 : ran.filter((trial) => trial.passed).length / ran.length,
+    retries: mine.reduce((sum, trial) => sum + trial.retries, 0),
+    meanCalls: mean(ran.map((trial) => trial.calls)),
+    meanCostUsd: mean(ran.map((trial) => trial.costUsd)),
+    probeConcerns: ran.reduce((sum, trial) => sum + trial.probeConcerns, 0),
+    challenges: ran.filter((trial) => trial.challengeFired).length,
     meanIllusionGap: gaps.length === 0 ? null : mean(gaps),
     retentionRate: rateOf((trial) => trial.retention),
     transferRate: rateOf((trial) => trial.transfer),
@@ -325,6 +408,17 @@ export interface Comparison {
  */
 function followUpCaveat(baseline: ConditionSummary, apparatus: ConditionSummary, delta: number): string | null {
   const notes: string[] = [];
+
+  // First, because it qualifies everything after it: a condition some of whose trials could
+  // not be run is being compared on a smaller sample than it looks, and the missing ones are
+  // missing for a reason that has nothing to do with teaching.
+  if (baseline.incomplete > 0 || apparatus.incomplete > 0) {
+    notes.push(
+      `${baseline.incomplete} baseline and ${apparatus.incomplete} apparatus trial(s) could not be run ` +
+        "(an unusable reply twice). Every rate above excludes them, so the comparison rests on " +
+        `${baseline.completed} against ${apparatus.completed} trials rather than ${baseline.trials} against ${apparatus.trials}`,
+    );
+  }
 
   if (baseline.followUpTooSoon || apparatus.followUpTooSoon) {
     const hours = apparatus.meanFollowUpHours ?? baseline.meanFollowUpHours ?? 0;
@@ -370,13 +464,17 @@ export function compare(trials: readonly TrialResult[], minTrialsPerCondition = 
   const delta = apparatus.passRate - baseline.passRate;
   const caveat = followUpCaveat(baseline, apparatus, delta);
 
-  if (baseline.trials < minTrialsPerCondition || apparatus.trials < minTrialsPerCondition) {
+  // The count that matters is the trials that RAN. An incomplete trial measured nothing, so
+  // treating it as a trial would let a run that mostly failed to execute pass for data.
+  if (baseline.completed < minTrialsPerCondition || apparatus.completed < minTrialsPerCondition) {
     return {
       baseline,
       apparatus,
       caveat,
       verdict: "inconclusive",
-      reason: `fewer than ${minTrialsPerCondition} trials in a condition — not enough to say anything`,
+      reason:
+        `fewer than ${minTrialsPerCondition} COMPLETED trials in a condition (baseline ${baseline.completed}, ` +
+        `apparatus ${apparatus.completed}) — not enough to say anything`,
     };
   }
 

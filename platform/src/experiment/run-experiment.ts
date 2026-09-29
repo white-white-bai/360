@@ -151,20 +151,25 @@ async function main(): Promise<void> {
   for (const { learner, trial } of rows) {
     // The asset that produced the verdict: the first question, or the retake's. They
     // are different claims about the learner and must not look the same.
-    const decidedBy = trial.retakeCheckId ?? check.id;
+    const decidedBy = trial.completed ? (trial.retakeCheckId ?? check.id) : "—";
     console.log(
-      `  ${pad(trial.condition, 12)}${pad(learner, 26)}${pad(trial.passed ? "pass" : "FAIL", 9)}${pad(decidedBy, 13)}${right(String(trial.probeConcerns), 9)}${right(String(trial.calls), 7)}${right(money(trial.costUsd), 10)}`,
+      `  ${pad(trial.condition, 12)}${pad(learner, 26)}${pad(trial.completed ? (trial.passed ? "pass" : "FAIL") : "INCOMPLETE", 9)}${pad(decidedBy, 13)}${right(String(trial.probeConcerns), 9)}${right(String(trial.calls), 7)}${right(money(trial.costUsd), 10)}`,
     );
+    if (!trial.completed) {
+      // The reason gets its own line and is not truncated. An incomplete trial is the one row
+      // a reader has to act on, and "why" is the whole of what it has to say.
+      console.log(`      ↳ could not be run: ${trial.incompleteReason ?? "unknown"}`);
+    }
   }
 
   const comparison = compare(trials, PROFILES.length);
   console.log("\nPER CONDITION");
-  console.log(`  ${pad("condition", 12)}${right("trials", 8)}${right("passed", 8)}${right("rate", 8)}${right("retention", 11)}${right("transfer", 10)}${right("mean calls", 12)}${right("mean cost", 12)}${right("illusion", 10)}`);
+  console.log(`  ${pad("condition", 12)}${right("ran", 6)}${right("incompl", 9)}${right("passed", 8)}${right("rate", 8)}${right("retries", 9)}${right("retention", 11)}${right("transfer", 10)}${right("mean calls", 12)}${right("mean cost", 12)}${right("illusion", 10)}`);
   // "no data" rather than 0%: a learner who never came back is not a learner who failed.
   const pct = (value: number | null): string => (value === null ? "no data" : `${(value * 100).toFixed(0)}%`);
   for (const summary of [comparison.baseline, comparison.apparatus]) {
     console.log(
-      `  ${pad(summary.condition, 12)}${right(String(summary.trials), 8)}${right(String(summary.passed), 8)}${right(`${(summary.passRate * 100).toFixed(0)}%`, 8)}${right(pct(summary.retentionRate), 11)}${right(pct(summary.transferRate), 10)}${right(summary.meanCalls.toFixed(1), 12)}${right(money(summary.meanCostUsd), 12)}${right(summary.meanIllusionGap === null ? "n/a" : summary.meanIllusionGap.toFixed(2), 10)}`,
+      `  ${pad(summary.condition, 12)}${right(String(summary.completed), 6)}${right(String(summary.incomplete), 9)}${right(String(summary.passed), 8)}${right(`${(summary.passRate * 100).toFixed(0)}%`, 8)}${right(String(summary.retries), 9)}${right(pct(summary.retentionRate), 11)}${right(pct(summary.transferRate), 10)}${right(summary.meanCalls.toFixed(1), 12)}${right(money(summary.meanCostUsd), 12)}${right(summary.meanIllusionGap === null ? "n/a" : summary.meanIllusionGap.toFixed(2), 10)}`,
     );
   }
   console.log(`  ${pad("challenges", 12)}${right(`baseline ${comparison.baseline.challenges}`, 24)}${right(`apparatus ${comparison.apparatus.challenges}`, 24)}`);
