@@ -15,7 +15,15 @@ function parseJson(text: string, what: string): unknown {
   try {
     return JSON.parse(text);
   } catch (error) {
-    throw new Error(`${what} is not valid JSON: ${(error as Error).message}`);
+    // The raw text is part of the message. A model that returns malformed JSON returns it
+    // in ways nobody predicts — a missing comma, a fence, a truncated string — and a parser
+    // that reports only an offset leaves the reader guessing at what actually arrived. The
+    // first live run against a real model stopped here with "position 33" and nothing else,
+    // which is a diagnostic that costs another round of real calls to replace.
+    throw new Error(
+      `${what} is not valid JSON: ${(error as Error).message}\n` +
+        `--- what arrived (${text.length} chars) ---\n${text.slice(0, 800)}`,
+    );
   }
 }
 

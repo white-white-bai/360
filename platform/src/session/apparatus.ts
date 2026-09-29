@@ -113,14 +113,17 @@ function probePrompt(expert: Expert, list: AssertionList): string {
 }
 
 function narrationPrompt(expert: Expert, list: AssertionList, probes: readonly Probe[]): string {
+  const ids = probes.map((probe) => probe.id);
   const placement =
     probes.length > 0
       ? [
           "# Probes to place as you go",
           JSON.stringify(probes),
           "Interleave `say` and `event` so the board fills in as you speak, and place each probe after",
-          "the claim it is about using {\"probe\":\"<id>\"}. Do not invent probes: the ids above are the",
-          "only ones that exist.",
+          'the claim it is about using {"probe":"<id>"}.',
+          `The ids ${ids.map((id) => `\`${id}\``).join(", ")} are the only ones that exist. A probe step naming`,
+          "anything else is refused: inventing your own question would take the authorship of the questions",
+          "back from whoever wrote them, which is the thing this split exists to prevent.",
         ]
       : [];
   return [
@@ -138,7 +141,17 @@ function narrationPrompt(expert: Expert, list: AssertionList, probes: readonly P
     "",
     "# Output contract",
     JSON_ONLY,
-    `{"steps":[{"say":"..."},{"event":{"kind":"text","id":"...","body":"..."}},{"probe":"Q1"}]}`,
+    // The example is built from the ids that ACTUALLY exist, and shows no probe form at all
+    // when there are none. It used to hard-code "Q1" while every other placeholder on the
+    // line was "..." — and a live model copied the literal, placing a probe that had never
+    // been authored. The fixture cannot show you that, because its probes happen to be
+    // named Q1 and Q2; a real model does it on the first run.
+    `{"steps":[{"say":"..."},{"event":{"kind":"text","id":"...","body":"..."}}${
+      ids.length > 0 ? `,{"probe":"${ids[0] as string}"}` : ""
+    }]}`,
+    ...(ids.length === 0
+      ? ["This lesson has no probes, so every step is either `say` or `event` — do not add a `probe` step."]
+      : []),
     "Do not include an `at` field — position on the timeline is assigned for you.",
     "You may use `rich` only when nothing else in the vocabulary can express the idea.",
   ].join("\n");

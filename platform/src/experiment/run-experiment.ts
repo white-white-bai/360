@@ -26,6 +26,14 @@ function right(text: string, width: number): string {
 
 const usd = (value: number): string => `$${value.toFixed(4)}`;
 
+/**
+ * How often to show that something is still happening.
+ *
+ * A live call takes seconds, so a dot per call is roughly a dot per four seconds. The
+ * number is a compromise between "the screen is moving" and "the screen is noise".
+ */
+const TICK_MS = 4000;
+
 async function main(): Promise<void> {
   const live = process.argv.includes("--live");
   const liveSelection = live ? selectLiveProvider() : null;
@@ -72,35 +80,62 @@ async function main(): Promise<void> {
   const trials: TrialResult[] = [];
   /** Kept alongside the results so a row can name the learner it belongs to. */
   const rows: Array<{ learner: string; trial: TrialResult }> = [];
+  const total = PROFILES.length * CONDITIONS.length;
+  let index = 0;
+
+  console.log(`\nRUNNING  ${total} trials`);
   for (const profile of PROFILES) {
     for (const condition of CONDITIONS) {
       const provider: ModelProvider =
         liveSelection?.provider ??
         new ScriptedProvider(condition === "baseline" ? baselineTrialScript() : apparatusTrialScript(profile));
 
-      const result = await runTrial(condition, provider, {
-        expert,
-        check,
-        retakeCheck,
-        list: stimulus,
-        probeAnswers: profile.probeAnswers,
-        terminalAnswer: profile.terminalAnswer,
-        retryAnswer: profile.retryAnswer,
-        transferCheck,
-        // ADR 0001 asks for a day. The clock is MOVED rather than waited on, and the
-        // elapsed time is printed with the result so a simulated day cannot pass for a
-        // real one.
-        followUp: {
-          afterHours: 24,
-          retentionAnswer: profile.retentionAnswer,
-          transferAnswer: profile.transferAnswer,
-        },
-        selfAssessment: profile.selfAssessment,
-      });
+      // Progress, and the reason it is here rather than in a comment: a live trial is several
+      // four-second round trips, and the report does not exist until every trial is done. The
+      // run was therefore silent for minutes, and a working experiment looked exactly like a
+      // hung one — which is how a real attempt got mistaken for a stall and killed.
+      index += 1;
+      const began = Date.now();
+      process.stdout.write(`  [${index}/${total}] ${condition} · ${profile.name} `);
+      const pulse = setInterval(() => process.stdout.write("."), TICK_MS);
+
+      let result: TrialResult;
+      try {
+        result = await runTrial(condition, provider, {
+          expert,
+          check,
+          retakeCheck,
+          list: stimulus,
+          probeAnswers: profile.probeAnswers,
+          terminalAnswer: profile.terminalAnswer,
+          retryAnswer: profile.retryAnswer,
+          transferCheck,
+          // ADR 0001 asks for a day. The clock is MOVED rather than waited on, and the
+          // elapsed time is printed with the result so a simulated day cannot pass for a
+          // real one.
+          followUp: {
+            afterHours: 24,
+            retentionAnswer: profile.retentionAnswer,
+            transferAnswer: profile.transferAnswer,
+          },
+          selfAssessment: profile.selfAssessment,
+        });
+      } catch (error) {
+        // A dead trial still has to end its own line, or the error is printed glued to a row
+        // of dots and reads as part of the progress rather than as a failure.
+        console.log(` FAILED TO RUN after ${((Date.now() - began) / 1000).toFixed(1)}s`);
+        throw error;
+      } finally {
+        clearInterval(pulse);
+      }
 
       if (stimulus === undefined) stimulus = result.list;
       trials.push(result);
       rows.push({ learner: profile.name, trial: result });
+      console.log(
+        `${result.passed ? "pass" : "FAIL"} · ${result.calls} calls · ${((Date.now() - began) / 1000).toFixed(1)}s` +
+          `${result.retaken ? " · retaken" : ""}`,
+      );
     }
   }
 
