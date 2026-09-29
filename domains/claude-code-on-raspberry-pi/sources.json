@@ -1,0 +1,32 @@
+[
+  {
+    "index": 0,
+    "requested": "https://docs.claude.com/en/docs/claude-code/overview",
+    "url": "https://code.claude.com/docs/en/overview",
+    "fetchedAt": "2026-09-29T09:08:28.025Z",
+    "mediaType": "text/html",
+    "sha256": "43a135edec203a03c500dd384a096f94a5b258ee40713e7c172277fa07b86d37",
+    "bytes": 533793,
+    "text": "sources/00-code-claude-com-docs-en-overview.txt"
+  },
+  {
+    "index": 1,
+    "requested": "https://docs.claude.com/en/docs/claude-code/setup",
+    "url": "https://code.claude.com/docs/en/setup",
+    "fetchedAt": "2026-09-29T09:08:29.704Z",
+    "mediaType": "text/html",
+    "sha256": "8bede3b485858676220041a7682eac4e3409ff66939454bbb939596a38897ca3",
+    "bytes": 990339,
+    "text": "sources/01-code-claude-com-docs-en-setup.txt"
+  },
+  {
+    "index": 2,
+    "requested": "https://docs.claude.com/en/docs/claude-code/cli-reference",
+    "url": "https://code.claude.com/docs/en/cli-reference",
+    "fetchedAt": "2026-09-29T09:08:32.392Z",
+    "mediaType": "text/html",
+    "sha256": "1b5d3f33af3623c638809dd185a6b01a3a5681a6b7b2c8715e1833d711ee3cb0",
+    "bytes": 523153,
+    "text": "sources/02-code-claude-com-docs-en-cli-reference.txt"
+  }
+]
