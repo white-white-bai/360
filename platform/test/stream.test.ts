@@ -85,12 +85,37 @@ test("every step is reported as it lands, in order", async () => {
     REQUEST,
     emptyLog("s"),
     ACTOR,
-    { onStep: (log) => seen.push(log.narration.length + log.events.length) },
+    { onStep: (log) => { seen.push(log.narration.length + log.events.length); } },
   );
 
   assert.equal(seen.length, turn.steps.length, "one report per step");
   assert.deepEqual(seen, [...seen].sort((a, b) => a - b), "and the board only ever grows");
   assert.equal(seen[seen.length - 1], turn.log.narration.length + turn.log.events.length);
+});
+
+test("the hook is told which step arrived, before any rewriting", async () => {
+  // The probe id exists in exactly one place by the time a step lands: the step as it ARRIVED.
+  // `prepare` replaces it with the authored question text, which is what belongs on the board
+  // and not what identifies the probe — so without this second argument there is no way to know
+  // which probe a line on the board was, and nowhere to put the question to the learner.
+  const sources: Array<string | undefined> = [];
+  await runTurn(
+    new ScriptedProvider({ "lead-explainer": APPARATUS_NARRATION }),
+    REQUEST,
+    emptyLog("s"),
+    ACTOR,
+    {
+      prepare: (step) => (step.probe === undefined ? step : { say: "REWRITTEN" }),
+      onStep: (_log, step, source) => {
+        assert.equal(step.say === "REWRITTEN", source.probe !== undefined, "the rewrite is visible and paired");
+        sources.push(source.probe);
+      },
+    },
+  );
+
+  // Whatever the fixture places, every probe step must have had a source, and the ids must have
+  // reached the hook. Asserting the exact list would be asserting the fixture, not the contract.
+  assert.ok(sources.includes("Q1"), `the probe id survives to the hook; saw ${JSON.stringify(sources)}`);
 });
 
 test("a streamed call is metered exactly like a buffered one", async () => {

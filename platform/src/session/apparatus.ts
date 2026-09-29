@@ -462,9 +462,34 @@ export async function runApparatusSession(
 
   // 5 — the narration, with the probes placed inside it.
   //
-  // Streamed, because this is where the board fills (ADR 0005). The probes are
-  // substituted per step as it lands: doing it afterwards would put probe IDs on the
-  // board while the turn was arriving.
+  // Streamed, because this is where the board fills (ADR 0005). The probes are substituted
+  // per step as it lands: doing it afterwards would put probe IDs on the board while the turn
+  // was arriving.
+  //
+  // Answers are collected HERE, at the moment each question is placed, rather than in one pass
+  // at the end. Asking somebody about a question they saw two minutes ago, after the lesson has
+  // moved on, is not a probe — it is a quiz on recall of the lesson's shape. Anything that
+  // answers the array form is unaffected: the array is still read at the end, and this only
+  // changes where a CALLBACK is called.
+  const asked = new Map<string, string>();
+  const place = async (
+    log: SessionLog,
+    step: ExplanationStep,
+    source: ExplanationStep,
+  ): Promise<void> => {
+    // The question lands first, then it is put. The other order asks about something that is
+    // not on the screen yet.
+    await input.onStep?.(log, step);
+
+    if (source.probe === undefined || input.askProbe === undefined) return;
+    const index = probes.findIndex((candidate) => candidate.id === source.probe);
+    if (index === -1) return; // `speakOne` already refused an unknown id, so this cannot happen
+    const answer = await input.askProbe(probes[index] as Probe, index);
+    // Recorded even when skipped, so the pass below knows this probe has already been put and
+    // does not put it twice.
+    asked.set(source.probe, answer ?? "");
+  };
+
   const narration = await runTurn(
     meter,
     {
@@ -475,7 +500,7 @@ export async function runApparatusSession(
     },
     emptyLog(sessionId, { domainId: expert.domain.id }),
     "lead-explainer",
-    { prepare: (step) => speakOne(step, probes), onStep: input.onStep, retry: budget },
+    { prepare: (step) => speakOne(step, probes), onStep: place, retry: budget },
   );
   phases.push("narration");
   let log = narration.log;
@@ -490,8 +515,18 @@ export async function runApparatusSession(
   const outcomes: ProbeOutcome[] = [];
   if (!off("probes")) {
     for (const [index, probe] of probes.entries()) {
-      const answer =
-        input.askProbe === undefined ? input.probeAnswers[index] : await input.askProbe(probe, index);
+      // Already put, at the point in the lesson where the question belongs. Only a probe the
+      // narration never placed is asked here — and it is still asked, because a model that
+      // forgot to place one must not cost the session its measurement.
+      let answer: string | undefined;
+      if (asked.has(probe.id)) {
+        const gathered = asked.get(probe.id) as string;
+        answer = gathered === "" ? undefined : gathered;
+      } else if (input.askProbe === undefined) {
+        answer = input.probeAnswers[index];
+      } else {
+        answer = await input.askProbe(probe, index);
+      }
       if (answer === undefined) continue;
       outcomes.push(
         await ask(

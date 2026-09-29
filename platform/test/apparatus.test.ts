@@ -263,3 +263,54 @@ test("a log written before answers were recorded still loads", async () => {
   const legacy = JSON.stringify({ sessionId: "old", narration: [], events: [] });
   assert.deepEqual(deserializeLog(legacy).answers, []);
 });
+
+test("a probe is put to the learner where the lesson asks it, not at the end", async () => {
+  // Asking somebody about a question they saw two minutes ago, after the lesson has moved on,
+  // is a quiz on recall of the lesson's SHAPE. The fixture places Q1 partway through the
+  // narration, so the answer must be asked for before the narration is finished.
+  let sizeSoFar = 0;
+  const askedAt: number[] = [];
+
+  const result = await runApparatusSession(new ScriptedProvider(misconceptionScript()), {
+    expert,
+    check,
+    probeAnswers: [],
+    terminalAnswer: check.expected,
+    askProbe: async () => {
+      askedAt.push(sizeSoFar);
+      return "夏令时就是把偏移量改一下";
+    },
+    onStep: (log) => {
+      sizeSoFar = log.narration.length + log.events.length;
+    },
+  });
+
+  const total = result.log.narration.length + result.log.events.length;
+  assert.ok(askedAt.length >= 1, "the probes the narration placed were put to the learner");
+  // The property, not a count: every ask happened while the lesson was still going. A count
+  // would be asserting how many probes the fixture places, which is not what this is about.
+  for (const at of askedAt) {
+    assert.ok(at < total, `a probe was asked after step ${at} of ${total} — it has to come mid-lesson`);
+  }
+  assert.equal(result.outcomes.length, askedAt.length, "and every answer still reaches a probe outcome");
+});
+
+test("no probe is put to the learner twice", async () => {
+  // Inline and fallback are two paths to the same question. If both fired for the same probe,
+  // the learner would answer it twice, the evaluator would grade it twice, and the ledger would
+  // be billed for both — a duplication that looks like a thorough assessment.
+  const ids: string[] = [];
+  const result = await runApparatusSession(new ScriptedProvider(misconceptionScript()), {
+    expert,
+    check,
+    probeAnswers: [],
+    terminalAnswer: check.expected,
+    askProbe: async (probe) => {
+      ids.push(probe.id);
+      return "夏令时就是把偏移量改一下";
+    },
+  });
+
+  assert.equal(new Set(ids).size, ids.length, `asked twice: ${JSON.stringify(ids)}`);
+  assert.equal(result.log.answers.length, ids.length, "and each answer is recorded once");
+});

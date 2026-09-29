@@ -16,8 +16,21 @@ export interface TurnOptions {
    * otherwise a streamed session would put probe IDs on the blackboard.
    */
   prepare?: (step: ExplanationStep) => ExplanationStep;
-  /** Called after each step lands, so a live board can redraw. */
-  onStep?: (log: SessionLog, step: ExplanationStep) => void;
+  /**
+   * Called after each step lands, so a live board can redraw and a learner can be asked.
+   *
+   * It may be async, because asking a person takes as long as it takes — the narration has to
+   * be able to STOP at a probe rather than run to the end and collect answers afterwards.
+   *
+   * `source` is the step as it arrived, BEFORE `prepare`. That is the only place the probe id
+   * still exists: `prepare` replaces `{probe:"Q1"}` with the authored question text, which is
+   * what belongs on the board and not what identifies the probe.
+   */
+  onStep?: (
+    log: SessionLog,
+    step: ExplanationStep,
+    source: ExplanationStep,
+  ) => void | Promise<void>;
   /**
    * Retry budget. Present means an unusable reply is retried once.
    *
@@ -59,20 +72,24 @@ export async function runTurn(
   // sometimes refused is this number.
   let landed = 0;
 
-  const land = (current: SessionLog, step: ExplanationStep): SessionLog => {
+  const land = async (
+    current: SessionLog,
+    step: ExplanationStep,
+    source: ExplanationStep,
+  ): Promise<SessionLog> => {
     const next = applySteps(current, [step], actor);
     landed += 1;
-    options.onStep?.(next, step);
+    await options.onStep?.(next, step, source);
     return next;
   };
 
   const attempt = async (asked: CompletionRequest): Promise<TurnResult> => {
     if (provider.stream === undefined) {
       const completion = await provider.complete(asked);
-      const steps = parseExplanation(completion.text).steps.map(prepare);
+      const raw = parseExplanation(completion.text).steps;
       let current = log;
-      for (const step of steps) current = land(current, step);
-      return { text: completion.text, log: current, steps, streamed: false };
+      for (const source of raw) current = await land(current, prepare(source), source);
+      return { text: completion.text, log: current, steps: raw.map(prepare), streamed: false };
     }
 
     const scanner = new StepScanner();
@@ -87,9 +104,9 @@ export async function runTurn(
         // Parsed through the same door as a finished turn, so a streamed step is
         // validated exactly as strictly as a buffered one.
         const parsed = parseExplanation(`{"steps":[${raw}]}`).steps;
-        const step = prepare(parsed[0] as ExplanationStep);
-        current = land(current, step);
-        shown.push(step);
+        const source = parsed[0] as ExplanationStep;
+        current = await land(current, prepare(source), source);
+        shown.push(prepare(source));
       }
     }
 
