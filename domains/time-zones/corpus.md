@@ -1,5 +1,5 @@
 <!--
-NOT YET HUMAN-VERIFIED.
+REVIEWED. Signed off by 白杨 on 2026-09-28 against the machine-check record below.
 
 These are STATEMENTS the cited sources support, written in our own words. They
 are NOT quotations, and they used to be formatted as blockquotes, which wrongly
@@ -7,7 +7,7 @@ implied they were verbatim. Do not treat any sentence here as the source's
 wording.
 
 Machine-checked 2026-09-28 against the fetched primary documents. Every passage
-now cites a document that was actually opened and read:
+cites a document that was actually opened and read:
 
   P-offset-is-signed                  RFC 3339 §4.2   HOLDS
   P-rfc3339-carries-offset-not-zone   RFC 3339 §5.6   HOLDS (edited, see 1)
@@ -28,11 +28,11 @@ Two corrections came out of checking, and both are worth remembering:
      cite the document that was actually read. A verified source beats a
      better-sounding one.
 
-A machine comparison is NOT a human review: it reads a document and reports,
-where a person is accountable for the result (ADR 0006). Every passage here is
-machine-checked and NONE has been signed off by a person, so the Domain must not
-be used for the acceptance experiment (ADR 0001) and `npm run validate` keeps
-reporting `corpus.review-outstanding` until a named person confirms the list above.
+TWO KINDS OF EVIDENCE, and they are recorded separately on purpose. The check
+above was made by a model comparing this text to the documents; the sign-off in
+`meta.md` is a person accepting that comparison. Neither substitutes for the
+other, and conflating them is how "someone looked at it" becomes indistinguishable
+from "a script ran". `npm run validate` requires both.
 -->
 
 # Corpus — time stamps, time zones and daylight saving

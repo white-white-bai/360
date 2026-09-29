@@ -57,6 +57,8 @@ const DEFAULTS = {
     "id: d",
     "name: Test domain",
     "owner: A Named Person",
+    "corpusReviewedBy: A Named Person",
+    "corpusReviewedOn: 2026-01-01",
     "deliveryLanguage: zh",
     "sources:",
     "  - RFC 3339 — https://www.rfc-editor.org/rfc/rfc3339",
@@ -116,6 +118,19 @@ function run(root: string): { codes: string[]; errors: number; warnings: number 
     warnings: report.warnings,
   };
 }
+
+test("an unrecorded corpus review is an error, not a missing comment", (t) => {
+  // The rule used to look for a "NOT YET HUMAN-VERIFIED" banner, which meant that
+  // deleting a line cleared it. The review is a field now, so the only way to pass
+  // is to name a person and a date.
+  const root = tmpRoot(t);
+  // A key that is absent is caught by the loader and surfaces as `asset.unloadable`.
+  // This rule exists for the key that is present and unfilled.
+  writeDomain(root, { meta: DEFAULTS.meta.replace("corpusReviewedBy: A Named Person", "corpusReviewedBy: TODO") });
+  const result = run(root);
+  assert.ok(result.codes.includes("corpus.review-missing"), `got: ${result.codes.join(", ")}`);
+  assert.ok(result.errors > 0, "an unsigned corpus must block the acceptance experiment");
+});
 
 test("a well-formed library and domain produce no errors", (t) => {
   const root = tmpRoot(t);

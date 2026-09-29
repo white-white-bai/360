@@ -56,6 +56,20 @@ export interface Domain {
   name: string;
   /** A named person, not a team (ADR 0006). */
   owner: string;
+  /**
+   * Who signed off on the corpus, and when.
+   *
+   * Two kinds of evidence live here and they are deliberately separate: a machine
+   * comparison (recorded in the corpus file's header) says a script read the cited
+   * documents and reported; this says a person accepted that report. Neither
+   * substitutes for the other.
+   *
+   * Stored as fields rather than left in a comment, because a comment cannot be
+   * checked — and "the banner is gone" is not the same claim as "someone vouched
+   * for this". The validator requires both to be present.
+   */
+  corpusReviewedBy: string;
+  corpusReviewedOn: string;
   /** Language the teaching is delivered in; the corpus stays in its source language. */
   deliveryLanguage: string;
   sources: string[];

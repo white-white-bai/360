@@ -85,6 +85,8 @@ export function loadDomain(dir: string): Domain {
     id,
     name: requireString(data, "name", where),
     owner: requireString(data, "owner", where),
+    corpusReviewedBy: requireString(data, "corpusReviewedBy", where),
+    corpusReviewedOn: requireString(data, "corpusReviewedOn", where),
     deliveryLanguage: requireString(data, "deliveryLanguage", where),
     sources: requireList(data, "sources", where),
     corpus: parseCorpus(read(join(dir, "corpus.md")), id),

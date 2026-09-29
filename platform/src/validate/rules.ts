@@ -70,7 +70,7 @@ function domainDirs(dir: string): string[] {
 // ---------------------------------------------------------------- corpus rules
 
 /**
- * Provenance, checked at two strengths.
+ * Provenance, checked at two strengths, plus the sign-off.
  *
  * Note what is NOT here: a rule for "this passage has no source at all". The
  * parser already refuses to load such a corpus, so that rule could never fire —
@@ -82,6 +82,29 @@ function domainDirs(dir: string): string[] {
  */
 function validateCorpus(domain: Domain, dir: string): Finding[] {
   const findings: Finding[] = [];
+
+  // A review is a FIELD, not the absence of a warning banner.
+  //
+  // The first version of this rule looked for a "NOT YET HUMAN-VERIFIED" comment,
+  // which meant the error could be cleared by deleting a line. A check that passes
+  // when you remove the evidence is not a check, and "the banner is gone" is a
+  // different claim from "someone vouched for this".
+  //
+  // A key that is ABSENT never reaches here: the loader requires both and refuses
+  // the Domain, which surfaces as `asset.unloadable`. What this rule adds is the
+  // case the loader cannot see — a key that is present and unfilled, such as
+  // `corpusReviewedBy: TODO`. Same division of labour as provenance above.
+  if (placeholder(domain.corpusReviewedBy) || placeholder(domain.corpusReviewedOn)) {
+    findings.push(
+      finding(
+        "error",
+        "corpus.review-missing",
+        `domains/${domain.id}/meta.md`,
+        `the corpus review is not recorded: corpusReviewedBy=${JSON.stringify(domain.corpusReviewedBy)}, corpusReviewedOn=${JSON.stringify(domain.corpusReviewedOn)}`,
+        "name the person who accepted the provenance check, and the date — a machine comparison is not a sign-off",
+      ),
+    );
+  }
 
   for (const passage of domain.corpus.passages) {
     const where = `domains/${domain.id}/corpus.md#${passage.id}`;

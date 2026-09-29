@@ -2,6 +2,8 @@
 id: time-zones
 name: 时间戳、时区与夏令时
 owner: 白杨
+corpusReviewedBy: 白杨
+corpusReviewedOn: 2026-09-28
 deliveryLanguage: zh
 sources:
   - RFC 3339 — https://www.rfc-editor.org/rfc/rfc3339
