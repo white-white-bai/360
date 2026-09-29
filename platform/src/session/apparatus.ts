@@ -208,9 +208,33 @@ export interface UnlistedConcern {
 export interface ApparatusInput {
   expert: Expert;
   check: UnderstandingCheck;
-  /** Answers to the probes, in the order the probes were authored. */
+  /**
+   * Answers to the probes, in the order the probes were authored.
+   *
+   * Used unless `askProbe` is supplied. The array is what a scripted or simulated learner
+   * provides; a callback is what a person at a keyboard provides. The session does not care
+   * which it was given, and that is the point — the loop is the same loop either way, so a
+   * demonstration and a real lesson cannot drift apart.
+   */
   probeAnswers: readonly string[];
   terminalAnswer: string;
+  /**
+   * When present, the terminal answer is ASKED FOR rather than read from `terminalAnswer`.
+   *
+   * It is asked at the one place the answer belongs — after the narration and before
+   * grading — because asking earlier would be asking about a lesson the learner has not
+   * had yet.
+   */
+  askTerminal?: (check: UnderstandingCheck) => Promise<string>;
+  /** When present, each probe answer is asked for rather than read from `probeAnswers`. */
+  askProbe?: (probe: Probe, index: number) => Promise<string | undefined>;
+  /**
+   * When present, the retake answer is asked for rather than read from `retryAnswer`.
+   *
+   * Only called when a retake is actually going to happen. Asking a question that is not
+   * needed would make the extra sitting look like part of the lesson.
+   */
+  askRetake?: (check: UnderstandingCheck) => Promise<string | undefined>;
   /**
    * The learner's answer if they are asked again after a retry.
    *
@@ -408,7 +432,7 @@ export async function runApparatusSession(
         challenge: { fired: false, triggers: [] },
         verdict: null,
         verdictAfterRetry: null,
-        log: emptyLog(sessionId),
+        log: emptyLog(sessionId, { domainId: expert.domain.id }),
         surface: render([]),
         usage: meter.total(),
         saved: false,
@@ -449,7 +473,7 @@ export async function runApparatusSession(
       system: narrationPrompt(expert, list, probes),
       input: "Teach the verified claims.",
     },
-    emptyLog(sessionId),
+    emptyLog(sessionId, { domainId: expert.domain.id }),
     "lead-explainer",
     { prepare: (step) => speakOne(step, probes), onStep: input.onStep, retry: budget },
   );
@@ -457,14 +481,17 @@ export async function runApparatusSession(
   let log = narration.log;
 
   // 6 — the terminal check. The same hand-authored asset in every condition.
-  const verdict = gradeObjectively(check, input.terminalAnswer);
+  const terminalAnswer =
+    input.askTerminal === undefined ? input.terminalAnswer : await input.askTerminal(check);
+  const verdict = gradeObjectively(check, terminalAnswer);
   phases.push("terminal-check");
 
   // 7 — probe outcomes.
   const outcomes: ProbeOutcome[] = [];
   if (!off("probes")) {
     for (const [index, probe] of probes.entries()) {
-      const answer = input.probeAnswers[index];
+      const answer =
+        input.askProbe === undefined ? input.probeAnswers[index] : await input.askProbe(probe, index);
       if (answer === undefined) continue;
       outcomes.push(
         await ask(
@@ -555,7 +582,7 @@ export async function runApparatusSession(
   // measures recall of that question. Falling back to the same check is a visible
   // degradation, not a default.
   let verdictAfterRetry: CheckVerdict | null = null;
-  if (verdict.verdict === "fail" && input.retryAnswer !== undefined && !off("challenger")) {
+  if (verdict.verdict === "fail" && !off("challenger")) {
     // Gated on the Challenger being on, because the second sitting belongs to the
     // remediation path. Ablating the Challenger ablates the retake too — a baseline
     // that asked the learner again WITHOUT re-teaching them would be measuring a
@@ -566,8 +593,16 @@ export async function runApparatusSession(
     // question, and the number would flatter the apparatus for a reason that has
     // nothing to do with understanding: the retake must describe a situation the
     // retry did not.
-    verdictAfterRetry = gradeObjectively(input.retakeCheck ?? check, input.retryAnswer);
-    phases.push("retake");
+    const retakeAsset = input.retakeCheck ?? check;
+    const retryAnswer =
+      input.askRetake === undefined ? input.retryAnswer : await input.askRetake(retakeAsset);
+
+    // A learner who stops is not carried by the retake, and a question nobody was asked
+    // must not be graded.
+    if (retryAnswer !== undefined) {
+      verdictAfterRetry = gradeObjectively(retakeAsset, retryAnswer);
+      phases.push("retake");
+    }
   }
 
   const surface = render(log.events);

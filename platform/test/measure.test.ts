@@ -12,7 +12,7 @@ const terminal = findCheck(expert.domain.checks, "C-gap");
 const transfer = findCheck(expert.domain.checks, "T-fixed-offset");
 
 const TAUGHT_AT = new Date("2026-03-08T10:00:00.000Z");
-const log = emptyLog("s", TAUGHT_AT.toISOString());
+const log = emptyLog("s", { startedAt: TAUGHT_AT.toISOString() });
 
 test("a session with no start time cannot be measured for retention", () => {
   // Retention is a claim about elapsed time. Without a start there is nothing to

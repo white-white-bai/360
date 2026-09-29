@@ -52,14 +52,36 @@ export interface SessionLog {
   sessionId: string;
   /** ISO 8601, or null for a log written before this was recorded. */
   startedAt: string | null;
+  /**
+   * Which Domain taught this session.
+   *
+   * A session is resumable (ADR 0002), and resuming means asking its checks again a day
+   * later — which is impossible without knowing what was taught. Until this field existed
+   * the record could not describe itself, so the follow-up measurement had to be told the
+   * Domain by hand, and a session restored from disk was a lesson with no subject.
+   */
+  domainId: string | null;
   narration: NarrationChunk[];
   events: BlackboardEvent[];
   answers: AnswerChunk[];
   followUps: FollowUpRecord[];
 }
 
-export function emptyLog(sessionId: string, startedAt: string | null = new Date().toISOString()): SessionLog {
-  return { sessionId, startedAt, narration: [], events: [], answers: [], followUps: [] };
+export interface NewSession {
+  startedAt?: string | null;
+  domainId?: string | null;
+}
+
+export function emptyLog(sessionId: string, options: NewSession = {}): SessionLog {
+  return {
+    sessionId,
+    startedAt: options.startedAt ?? new Date().toISOString(),
+    domainId: options.domainId ?? null,
+    narration: [],
+    events: [],
+    answers: [],
+    followUps: [],
+  };
 }
 
 /** Next free position on the shared timeline. */
@@ -150,6 +172,7 @@ export function deserializeLog(text: string): SessionLog {
     // given a start time by the act of reading it, or retention would be measured
     // from the moment of inspection.
     startedAt: typeof candidate.startedAt === "string" ? candidate.startedAt : null,
+    domainId: typeof candidate.domainId === "string" ? candidate.domainId : null,
     narration,
     events,
     answers: answers as AnswerChunk[],
