@@ -75,6 +75,29 @@
     padding: 8px 18px; font: inherit; cursor: pointer;
     background: var(--accent); color: #1b2f28; border: 0; border-radius: 3px;
   }
+
+  /* The learner's own question bar (ADR 0008). Open while the lesson is being taught; the
+     session takes what is typed at its next pause. */
+  #askq {
+    grid-column: 1 / -1;
+    display: none;
+    gap: 14px;
+    align-items: baseline;
+    padding: 10px 18px;
+    background: #12241e;
+    border-top: 1px solid #23372f;
+  }
+  #askq.open { display: flex; }
+  #askq .hint { color: var(--dim); font-size: 12px; }
+  #askq input {
+    flex: 2; min-width: 12rem; padding: 6px 10px; font: inherit;
+    background: #0e1a17; color: var(--chalk);
+    border: 1px solid var(--grid); border-radius: 3px;
+  }
+  #askq button {
+    padding: 6px 16px; font: inherit; cursor: pointer;
+    background: #2c4a42; color: var(--chalk); border: 0; border-radius: 3px;
+  }
   #said { grid-column: 1 / -1; padding: 0 18px 8px; color: var(--dim); font-size: 12px; }
 
   #board {
@@ -149,6 +172,12 @@
   <input id="answer" autocomplete="off" />
   <button type="submit">回答</button>
 </form>
+
+<form id="askq">
+  <span class="hint">课中随时可以提问；老师讲到下一句时会接住。</span>
+  <input id="askq-text" autocomplete="off" placeholder="关于刚才讲的内容，想问点什么？" />
+  <button type="submit">提问</button>
+</form>
 <div id="said"></div>
 
 <script>
@@ -157,6 +186,9 @@ const narration = document.getElementById("narration");
 const status = document.getElementById("status");
 const who = document.getElementById("who");
 const clock = document.getElementById("clock");
+const askqForm = document.getElementById("askq");
+const askqInput = document.getElementById("askq-text");
+const said = document.getElementById("said");
 
 const ROLE = { "lead-explainer": "主讲", challenger: "质疑者" };
 
@@ -254,11 +286,22 @@ function drawNarration(chunks) {
 
 const source = new EventSource("/board");
 let landed = 0;
+/** Whether this page is the learner, and the token its questions travel with. */
+let learnerMode = false;
+let sessionToken = null;
 
 source.addEventListener("meta", (message) => {
   const meta = JSON.parse(message.data);
   who.textContent = meta.expert;
   status.textContent = meta.mode === "live" ? "实时 provider" : "夹具回放";
+  learnerMode = meta.learner === true;
+  sessionToken = meta.token ?? null;
+  // The question bar belongs to a board where somebody can take a question. A recording has no
+  // answer on file, so offering the input there would be offering nothing.
+  askqForm.classList.toggle("open", meta.questions === true);
+  if (learnerMode && meta.questions !== true) {
+    said.textContent = "（这是录制回放：可以答，不能问——提问要接上真模型，加 ?live=1。）";
+  }
 });
 
 source.addEventListener("surface", (message) => {
@@ -271,7 +314,6 @@ source.addEventListener("surface", (message) => {
 
 const askForm = document.getElementById("ask");
 const answerInput = document.getElementById("answer");
-const said = document.getElementById("said");
 /** The question the session is currently waiting on. Null means it is not waiting on one. */
 let pendingToken = null;
 
@@ -310,6 +352,35 @@ askForm.addEventListener("submit", (event) => {
     body: JSON.stringify({ token, text: answerInput.value }),
   });
   answerInput.value = "";
+});
+
+askqForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!learnerMode || sessionToken === null) return;
+  const text = askqInput.value.trim();
+  if (text === "") return;
+  fetch("/question", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token: sessionToken, text }),
+  }).then((response) => {
+    if (response.ok) {
+      askqInput.value = "";
+      said.textContent = "（问出去了，老师讲到下一句时会接住。）";
+    } else {
+      // 409 is the honest case: one is already waiting, or the lesson can no longer take it.
+      said.textContent = "（现在问不了：等老师把上一个问题答完，或者这节课已经结束。）";
+    }
+  });
+});
+
+source.addEventListener("question-taken", (message) => {
+  const taken = JSON.parse(message.data);
+  said.textContent = "你问：" + taken.text;
+});
+
+source.addEventListener("question-dropped", () => {
+  said.textContent = "（课已经结束了，刚才的问题没来得及问。）";
 });
 
 source.addEventListener("done", (message) => {

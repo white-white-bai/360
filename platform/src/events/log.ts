@@ -25,6 +25,26 @@ export interface AnswerChunk {
 }
 
 /**
+ * A question the learner asked mid-lesson (ADR 0008).
+ *
+ * Recorded verbatim, and for two reasons. It is the learner's own words, which ADR
+ * 0002 already makes sensitive — the same lifecycle as their answers, or the most
+ * sensitive half of the record has a different one. And a REFUSED question is
+ * evidence about the Domain boundary: alongside the misconception queue, it is the
+ * half that says what learners wanted that this Domain does not cover.
+ */
+export interface QuestionChunk {
+  at: number;
+  text: string;
+  /**
+   * What came of it. A refusal is a delivery (ADR 0004: "I do not know" is a
+   * first-class output), not a failure — but the record should say which one the
+   * learner got.
+   */
+  outcome: "answered" | "refused";
+}
+
+/**
  * A measurement taken after the session, on the same learner (ADR 0001).
  *
  * Two kinds, and the difference is the asset, not the machinery. **Retention** asks
@@ -64,6 +84,7 @@ export interface SessionLog {
   narration: NarrationChunk[];
   events: BlackboardEvent[];
   answers: AnswerChunk[];
+  questions: QuestionChunk[];
   followUps: FollowUpRecord[];
 }
 
@@ -80,6 +101,7 @@ export function emptyLog(sessionId: string, options: NewSession = {}): SessionLo
     narration: [],
     events: [],
     answers: [],
+    questions: [],
     followUps: [],
   };
 }
@@ -90,6 +112,7 @@ export function nextAt(log: SessionLog): number {
   for (const chunk of log.narration) if (chunk.at > max) max = chunk.at;
   for (const event of log.events) if (event.at > max) max = event.at;
   for (const answer of log.answers) if (answer.at > max) max = answer.at;
+  for (const question of log.questions) if (question.at > max) max = question.at;
   for (const followUp of log.followUps) if (followUp.at > max) max = followUp.at;
   return max + 1;
 }
@@ -108,6 +131,16 @@ export function appendAnswer(log: SessionLog, answer: AnswerChunk): SessionLog {
     throw new Error("an answer must name the probe it answers");
   }
   return { ...log, answers: [...log.answers, answer] };
+}
+
+export function appendQuestion(log: SessionLog, question: QuestionChunk): SessionLog {
+  if (question.text.trim() === "") {
+    throw new Error("a question must be the learner's words, not an empty string");
+  }
+  if (question.outcome !== "answered" && question.outcome !== "refused") {
+    throw new Error(`a question's outcome must be answered or refused, got ${JSON.stringify(question.outcome)}`);
+  }
+  return { ...log, questions: [...log.questions, question] };
 }
 
 export function appendFollowUp(log: SessionLog, followUp: FollowUpRecord): SessionLog {
@@ -134,6 +167,22 @@ function assertAnswer(value: unknown): asserts value is AnswerChunk {
   }
   if (typeof answer.text !== "string") {
     throw new Error("an answer needs a string `text`");
+  }
+}
+
+function assertQuestion(value: unknown): asserts value is QuestionChunk {
+  if (typeof value !== "object" || value === null) {
+    throw new Error("each question must be an object");
+  }
+  const question = value as Record<string, unknown>;
+  if (typeof question.at !== "number" || !Number.isFinite(question.at)) {
+    throw new Error("a question needs a finite numeric `at`");
+  }
+  if (typeof question.text !== "string" || question.text.trim() === "") {
+    throw new Error("a question needs the learner's words, not an empty `text`");
+  }
+  if (question.outcome !== "answered" && question.outcome !== "refused") {
+    throw new Error(`a question's outcome must be answered or refused, got ${JSON.stringify(question.outcome)}`);
   }
 }
 
@@ -164,6 +213,9 @@ export function deserializeLog(text: string): SessionLog {
   const answers = Array.isArray(candidate.answers) ? (candidate.answers as unknown[]) : [];
   for (const answer of answers) assertAnswer(answer);
 
+  const questions = Array.isArray(candidate.questions) ? (candidate.questions as unknown[]) : [];
+  for (const question of questions) assertQuestion(question);
+
   const followUps = Array.isArray(candidate.followUps) ? (candidate.followUps as unknown[]) : [];
 
   return {
@@ -176,6 +228,7 @@ export function deserializeLog(text: string): SessionLog {
     narration,
     events,
     answers: answers as AnswerChunk[],
+    questions: questions as QuestionChunk[],
     followUps: followUps as FollowUpRecord[],
   };
 }

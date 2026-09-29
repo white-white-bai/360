@@ -7,6 +7,9 @@
  * is the same discipline applied to a different actor.
  */
 
+import type { AssertionList } from "../assertions/types.ts";
+import { parseAssertionList } from "../assertions/parse.ts";
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -139,4 +142,27 @@ export function parseProbeOutcome(text: string, probeId: string): ProbeOutcome {
     reason: typeof parsed.reason === "string" ? parsed.reason : "",
     misconceptionId,
   };
+}
+
+// ------------------------------------------------------------ in-lesson asks --
+
+/**
+ * What the explainer intends to do about a question asked mid-lesson (ADR 0008).
+ *
+ * Either the claims the answer rests on — verified before anything is said, exactly
+ * like the lesson — or an explicit decline. The decline is a first-class reply (ADR
+ * 0004): the model is given a way to say "out of Domain" BEFORE it writes claims, so
+ * a question this Domain cannot answer does not have to produce a fabricated
+ * citation first and be caught afterwards.
+ */
+export type AnswerPlan =
+  | { kind: "claims"; list: AssertionList }
+  | { kind: "decline"; reason: string };
+
+export function parseAnswerPlan(text: string, domainId: string): AnswerPlan {
+  const parsed = parseJson(text, "answer plan");
+  if (isRecord(parsed) && typeof parsed.cannotAnswer === "string" && parsed.cannotAnswer.trim() !== "") {
+    return { kind: "decline", reason: parsed.cannotAnswer };
+  }
+  return { kind: "claims", list: parseAssertionList(text, domainId) };
 }

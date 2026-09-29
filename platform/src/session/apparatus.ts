@@ -6,16 +6,17 @@ import type { Expert } from "../experts/types.ts";
 import { verifyAssertionList } from "../grounding/verify.ts";
 import type { ListVerdict } from "../grounding/verify.ts";
 import type { SessionLog } from "../events/log.ts";
-import { appendAnswer, emptyLog, nextAt } from "../events/log.ts";
+import { appendAnswer, appendQuestion, emptyLog, nextAt } from "../events/log.ts";
 import type { LedgerRow } from "../providers/meter.ts";
 import { SpendMeter } from "../providers/meter.ts";
 import { runTurn } from "./stream.ts";
+import { applySteps } from "./turn.ts";
 import type { CompletionRequest, ModelProvider } from "../providers/types.ts";
 import { ModelReplyUnusable, ReplyBudget, retryNote } from "./retry.ts";
 import type { Surface } from "../render/render.ts";
 import { render } from "../render/render.ts";
 import type { Probe, ProbeOutcome, SemanticVerdict } from "./contracts.ts";
-import { parseProbeOutcome, parseProbes, parseSemanticVerdicts } from "./contracts.ts";
+import { parseAnswerPlan, parseProbeOutcome, parseProbes, parseSemanticVerdicts } from "./contracts.ts";
 import type { ExplanationStep } from "./explanation.ts";
 import { BLACKBOARD_CONTRACT, corpusBlock, framing, glossaryBlock, misconceptionBlock } from "./prompt.ts";
 import type { SessionStore } from "./store.ts";
@@ -195,6 +196,66 @@ const PROBE_EVALUATOR_SYSTEM = (expert: Expert): string =>
     `{"concern":true,"reason":"...","misconceptionId":"M-..."}`,
   ].join("\n");
 
+function answerListPrompt(expert: Expert, question: string): string {
+  return [
+    "You are the Lead Explainer in a teaching session. The learner has asked a question mid-lesson,",
+    "and you are deciding what you can claim in answer, before anything is said.",
+    "",
+    framing(expert),
+    "",
+    corpusBlock(expert),
+    "",
+    glossaryBlock(expert),
+    "",
+    "# The learner's question",
+    question,
+    "",
+    "# Output contract",
+    JSON_ONLY,
+    'Either the claims your answer needs: {"assertions":[{"id":"A1","kind":"grounded","statement":"...","sources":["P-..."]}]}',
+    'or an explicit refusal: {"cannotAnswer":"what the corpus does not settle"}',
+    "A question mark does not move the knowledge boundary: if the corpus does not support an answer,",
+    "declare that it cannot be answered rather than guessing. `grounded` claims MUST cite the corpus",
+    "passages they follow from; `scaffold` MAY be ungrounded and MUST cite nothing.",
+  ].join("\n");
+}
+
+function answerNarrationPrompt(expert: Expert, question: string, list: AssertionList): string {
+  return [
+    "You are the Lead Explainer. The verified claims below answer a question the learner asked",
+    "mid-lesson. Answer it directly, resting on nothing else.",
+    "",
+    framing(expert),
+    "",
+    glossaryBlock(expert),
+    "",
+    BLACKBOARD_CONTRACT,
+    "",
+    "# The learner's question",
+    question,
+    "",
+    "# Verified claims — the answer rests on these",
+    JSON.stringify(list),
+    "",
+    "# Output contract",
+    JSON_ONLY,
+    `{"steps":[{"say":"..."},{"event":{"kind":"text","id":"...","body":"..."}}]}`,
+    "This is a detour inside a lesson, not a second lesson: answer the question and stop. Do not use",
+    "`probe` steps — an aside measures nothing — and do not include an `at` field.",
+    "You may use `rich` only when nothing else in the vocabulary can express the idea.",
+  ].join("\n");
+}
+
+/**
+ * What the learner hears when the Domain cannot answer, or when the answer's machinery broke
+ * (ADR 0008).
+ *
+ * Composed by the kernel, not the model: a model-written refusal can hedge, apologise and let
+ * a claim back in through the side door — and then the one output that must stay trustworthy
+ * and testable is the one nothing tests.
+ */
+export const CANNOT_ANSWER = "我不知道。这个问题超出了这节课能讲的范围。";
+
 // --------------------------------------------------------------- the session --
 
 export interface UnlistedConcern {
@@ -235,6 +296,15 @@ export interface ApparatusInput {
    * needed would make the extra sitting look like part of the lesson.
    */
   askRetake?: (check: UnderstandingCheck) => Promise<string | undefined>;
+  /**
+   * When present, the session checks for a question from the learner at every pause (ADR 0008).
+   *
+   * Polled at each step boundary of a teaching turn; a question starts an aside — claims,
+   * verification, narration — on the same rails as the lesson. A callback rather than a list
+   * because a question arrives when a person thinks of it, which is not something a simulated
+   * learner ever does: the experiment's conditions stay free of this by never supplying one.
+   */
+  takeQuestion?: () => string | undefined;
   /**
    * The learner's answer if they are asked again after a retry.
    *
@@ -490,6 +560,103 @@ export async function runApparatusSession(
     asked.set(source.probe, answer ?? "");
   };
 
+  /**
+   * Answer a question the learner asked mid-lesson (ADR 0008).
+   *
+   * Same rails as the lesson: the explainer states claims, the kernel checks the citations,
+   * an INDEPENDENT actor checks that the passages support them, and only then is anything
+   * narrated — onto the board, streamed. Every way of failing ends in the same kernel-written
+   * refusal rather than stopping a lesson whose own claims are all verified: a refusal is a
+   * delivery (ADR 0004), and one unanswerable question must not destroy a whole class.
+   */
+  const answerQuestion = async (starting: SessionLog, question: string): Promise<SessionLog> => {
+    // Where the question sits on the timeline, captured BEFORE the answer so the record places
+    // it where it was asked rather than where the answer happened to end.
+    const askedAt = nextAt(starting);
+    let current = starting;
+    let outcome: "answered" | "refused" = "refused";
+
+    try {
+      const plan = await ask(
+        meter,
+        {
+          actor: ACTOR.explainer,
+          model: MODEL,
+          system: answerListPrompt(expert, question),
+          input: "Decide what you can claim in answer.",
+        },
+        (text) => parseAnswerPlan(text, expert.domain.id),
+        budget,
+      );
+
+      if (plan.kind === "claims") {
+        const structuralAnswer = verifyAssertionList(plan.list, expert.domain.corpus);
+        if (structuralAnswer.ok) {
+          const supported = await ask(
+            meter,
+            {
+              actor: ACTOR.semanticVerifier,
+              model: MODEL,
+              system: verifyPrompt(expert),
+              input: JSON.stringify({ assertions: plan.list.assertions }),
+            },
+            parseSemanticVerdicts,
+            budget,
+          );
+
+          if (supported.every((verdict) => verdict.ok)) {
+            const spoken = await runTurn(
+              meter,
+              {
+                actor: ACTOR.explainer,
+                model: MODEL,
+                system: answerNarrationPrompt(expert, question, plan.list),
+                input: "Answer the learner's question.",
+              },
+              starting,
+              "lead-explainer",
+              {
+                // An aside may not place probes: nothing inside an answer is measured, and the
+                // probe ids belong to the lesson's own flow.
+                prepare: (step) => {
+                  if (step.probe !== undefined) {
+                    throw new Error("an aside tried to place a probe — answers do not measure anything");
+                  }
+                  return step;
+                },
+                onStep: input.onStep,
+                retry: budget,
+              },
+            );
+            current = spoken.log;
+            outcome = "answered";
+          }
+        }
+      }
+    } catch (error) {
+      // A reply the machinery could not use is not a refusal by the Domain, but it is still not
+      // an answer — the learner gets the same honest line instead of a stalled lesson, and the
+      // retry count in the ledger shows what it cost.
+      if (!(error instanceof ModelReplyUnusable)) throw error;
+    }
+
+    if (outcome === "refused") {
+      current = applySteps(current, [{ say: CANNOT_ANSWER }], "lead-explainer");
+    }
+    // The words go into the record beside the learner's probe answers, under the same lifecycle
+    // (ADR 0002): what they asked is as sensitive as what they answered.
+    return appendQuestion(current, { at: askedAt, text: question, outcome });
+  };
+
+  /** Polled at every pause of a teaching turn; a question, when there is one, is answered here. */
+  const interjection = async (current: SessionLog): Promise<SessionLog | undefined> => {
+    const question = input.takeQuestion?.();
+    if (question === undefined) return undefined;
+    const trimmed = question.trim();
+    if (trimmed === "") return undefined;
+    return answerQuestion(current, trimmed);
+  };
+
   const narration = await runTurn(
     meter,
     {
@@ -500,7 +667,7 @@ export async function runApparatusSession(
     },
     emptyLog(sessionId, { domainId: expert.domain.id }),
     "lead-explainer",
-    { prepare: (step) => speakOne(step, probes), onStep: place, retry: budget },
+    { prepare: (step) => speakOne(step, probes), onStep: place, retry: budget, interlude: interjection },
   );
   phases.push("narration");
   let log = narration.log;
@@ -583,7 +750,7 @@ export async function runApparatusSession(
       },
       log,
       "challenger",
-      { onStep: input.onStep, retry: budget },
+      { onStep: input.onStep, retry: budget, interlude: interjection },
     );
     phases.push("challenger");
     log = challenge.log;
@@ -599,7 +766,7 @@ export async function runApparatusSession(
       },
       log,
       "lead-explainer",
-      { onStep: input.onStep, retry: budget },
+      { onStep: input.onStep, retry: budget, interlude: interjection },
     );
     phases.push("re-teach");
     log = retry.log;

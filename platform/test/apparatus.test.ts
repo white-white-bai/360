@@ -5,12 +5,18 @@ import { findCheck } from "../src/checks/load.ts";
 import { deserializeLog, serializeLog } from "../src/events/log.ts";
 import { composeExpert, loadLibrary } from "../src/experts/load.ts";
 import { ScriptedProvider } from "../src/providers/scripted.ts";
-import { runApparatusSession } from "../src/session/apparatus.ts";
+import { CANNOT_ANSWER, runApparatusSession } from "../src/session/apparatus.ts";
 import {
+  ANSWER_DECLINE,
+  ANSWER_NARRATION,
+  ANSWER_PLAN,
+  ANSWER_VERDICTS_UNSUPPORTED,
   APPARATUS_LIST,
   APPARATUS_NARRATION,
   APPARATUS_PROBES,
   APPARATUS_RETRY,
+  APPARATUS_VERDICTS_OK,
+  answeredQuestionScript,
   cleanScript,
   misconceptionScript,
 } from "../src/session/fixtures-apparatus.ts";
@@ -314,3 +320,85 @@ test("no probe is put to the learner twice", async () => {
   assert.equal(new Set(ids).size, ids.length, `asked twice: ${JSON.stringify(ids)}`);
   assert.equal(result.log.answers.length, ids.length, "and each answer is recorded once");
 });
+
+// ------------------------------------------- a question asked mid-lesson (ADR 0008) --
+
+/** Run the apparatus with one question offered at the poll numbered `poll`. */
+function askOnPoll(script: Record<string, string | string[]>, question: string, poll: number) {
+  let polls = 0;
+  return runApparatusSession(new ScriptedProvider(script), {
+    expert,
+    check,
+    probeAnswers: PROBE_ANSWERS,
+    terminalAnswer: check.expected,
+    takeQuestion: () => {
+      polls += 1;
+      return polls === poll ? question : undefined;
+    },
+  });
+}
+
+test("a question asked mid-lesson is answered where the lesson is, and the lesson goes on", async () => {
+  const question = "时区和偏移量到底是什么关系？";
+  const result = await askOnPoll(answeredQuestionScript(), question, 3);
+
+  const texts = result.log.narration.map((chunk) => chunk.text);
+  const answerAt = texts.indexOf("好问题。偏移量是读数，时区是那本规则手册。");
+  assert.ok(answerAt > 0, "the answer must arrive mid-lesson, not before it");
+  assert.ok(answerAt < texts.length - 1, "and the lesson must carry on past it");
+  assert.ok(
+    result.surface.elements.some((element) => element.id === "qa1"),
+    "the answer lands on the board like any teaching",
+  );
+
+  // The record: the learner's words verbatim, with what came of them.
+  assert.equal(result.log.questions.length, 1);
+  assert.equal(result.log.questions[0]?.text, question);
+  assert.equal(result.log.questions[0]?.outcome, "answered");
+
+  // The detour does not join the lesson: the list, the verdict and the checks are the lesson's.
+  assert.equal(result.list.assertions.length, JSON.parse(APPARATUS_LIST).assertions.length);
+  assert.equal(result.verdict?.verdict, "pass");
+});
+
+test("a question the corpus cannot answer is refused, and the lesson is not destroyed", async () => {
+  const script = { ...cleanScript(), "lead-explainer": [APPARATUS_LIST, APPARATUS_NARRATION, ANSWER_DECLINE] };
+  const result = await askOnPoll(script, "闰秒是怎么处理的？", 3);
+
+  const texts = result.log.narration.map((chunk) => chunk.text);
+  const refusalAt = texts.indexOf(CANNOT_ANSWER);
+  assert.ok(refusalAt > 0, "the refusal arrives where the lesson paused");
+  assert.ok(refusalAt < texts.length - 1, "and the lesson carries on");
+  assert.equal(result.log.questions[0]?.outcome, "refused");
+  assert.equal(result.verdict?.verdict, "pass", "a verified lesson is not destroyed by one question");
+});
+
+test("an answer the passages do not support is refused too", async () => {
+  // The claims parse and the citations resolve — and the independent verifier says the passage
+  // does not say this. Nothing unverified may be delivered, so the learner gets the refusal.
+  const script = {
+    ...cleanScript(),
+    "lead-explainer": [APPARATUS_LIST, APPARATUS_NARRATION, ANSWER_PLAN],
+    "grounding-verifier": [APPARATUS_VERDICTS_OK, ANSWER_VERDICTS_UNSUPPORTED],
+  };
+  const result = await askOnPoll(script, "时区和偏移量到底是什么关系？", 3);
+
+  const texts = result.log.narration.map((chunk) => chunk.text);
+  assert.ok(texts.includes(CANNOT_ANSWER), "an unsupported answer must not be delivered");
+  assert.equal(result.log.questions[0]?.outcome, "refused");
+  assert.equal(result.verdict?.verdict, "pass");
+});
+
+test("a broken answer reply is retried once, then refused — and the lesson survives", async () => {
+  const script = {
+    ...cleanScript(),
+    "lead-explainer": [APPARATUS_LIST, APPARATUS_NARRATION, "{not json", "{still not json"],
+  };
+  const result = await askOnPoll(script, "时区和偏移量到底是什么关系？", 3);
+
+  assert.ok(result.log.narration.map((chunk) => chunk.text).includes(CANNOT_ANSWER));
+  assert.equal(result.retries, 1, "the unusable reply is retried once and the retry is counted");
+  assert.equal(result.log.questions[0]?.outcome, "refused");
+  assert.equal(result.verdict?.verdict, "pass");
+});
+

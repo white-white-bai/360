@@ -32,6 +32,14 @@ export interface TurnOptions {
     source: ExplanationStep,
   ) => void | Promise<void>;
   /**
+   * A pause where the caller may push the turn off course — the learner asking a question.
+   *
+   * Called at every step boundary, and a returned log must only EXTEND the current one:
+   * an interjection is a detour inside the turn, not a rewrite of it. Its content is
+   * recorded as ranges so the end-of-turn check can see through it (ADR 0008).
+   */
+  interlude?: (log: SessionLog) => SessionLog | undefined | Promise<SessionLog | undefined>;
+  /**
    * Retry budget. Present means an unusable reply is retried once.
    *
    * A turn that has already put steps on the board is NOT retried, whatever the budget
@@ -50,6 +58,45 @@ export interface TurnResult {
   steps: ExplanationStep[];
   /** True when the steps arrived incrementally rather than in one piece. */
   streamed: boolean;
+}
+
+/** A half-open [from, to) range of a stream that the turn's own steps did not put there. */
+interface Interjection {
+  narration: [number, number];
+  events: [number, number];
+}
+
+/**
+ * The content of a log in timeline order, positions stripped and interjection ranges removed.
+ *
+ * Used only when an interjection happened, where the strict comparison cannot apply: content
+ * and order are what the check has always been about, and the interleaving of the two streams
+ * is still compared here — only the position numbers, which an interjection necessarily moves,
+ * are left out.
+ */
+function contentSequence(log: SessionLog, interjections: readonly Interjection[]): string[] {
+  const dropped = (index: number, ranges: ReadonlyArray<[number, number]>): boolean =>
+    ranges.some(([from, to]) => index >= from && index < to);
+
+  const items: Array<{ at: number; content: unknown }> = [];
+  log.narration.forEach((chunk, index) => {
+    if (!dropped(index, interjections.map((interjection) => interjection.narration))) {
+      items.push({ at: chunk.at, content: { stream: "say", actor: chunk.actor, text: chunk.text } });
+    }
+  });
+  log.events.forEach((event, index) => {
+    if (!dropped(index, interjections.map((interjection) => interjection.events))) {
+      const rest: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(event)) {
+        if (key !== "at") rest[key] = value;
+      }
+      items.push({ at: event.at, content: { stream: "event", event: rest } });
+    }
+  });
+
+  return items
+    .sort((a, b) => a.at - b.at)
+    .map((item) => JSON.stringify(item.content));
 }
 
 /**
@@ -72,14 +119,33 @@ export async function runTurn(
   // sometimes refused is this number.
   let landed = 0;
 
+  // Content the turn did not author, inserted at boundaries by the interjection point. The
+  // ranges are absolute indices and stay valid forever, because a log only ever grows.
+  const interjections: Interjection[] = [];
+
   const land = async (
     current: SessionLog,
     step: ExplanationStep,
     source: ExplanationStep,
   ): Promise<SessionLog> => {
-    const next = applySteps(current, [step], actor);
+    let next = applySteps(current, [step], actor);
     landed += 1;
     await options.onStep?.(next, step, source);
+
+    const after = await options.interlude?.(next);
+    if (after !== undefined && after !== next) {
+      if (after.narration.length < next.narration.length || after.events.length < next.events.length) {
+        throw new Error(
+          "an interjection must extend the log, not rewrite it — it is a detour inside the turn, " +
+            "and the end-of-turn check has no way to see through a log that shrank",
+        );
+      }
+      interjections.push({
+        narration: [next.narration.length, after.narration.length],
+        events: [next.events.length, after.events.length],
+      });
+      next = after;
+    }
     return next;
   };
 
@@ -114,10 +180,20 @@ export async function runTurn(
     // learner watched is the board the finished turn describes; comparing counts would
     // pass a scanner that swapped one step for another.
     const authoritative = applySteps(log, parseExplanation(text).steps.map(prepare), actor);
-    if (
-      JSON.stringify(authoritative.narration) !== JSON.stringify(current.narration) ||
-      JSON.stringify(authoritative.events) !== JSON.stringify(current.events)
-    ) {
+    const diverged =
+      interjections.length === 0
+        ? // Nothing interjected: bit for bit, exactly as before.
+          JSON.stringify(authoritative.narration) !== JSON.stringify(current.narration) ||
+          JSON.stringify(authoritative.events) !== JSON.stringify(current.events)
+        : // Something interjected: the two logs can no longer be compared position by position,
+          // because the interjection necessarily moved every position after it — and both sides
+          // allocate positions from the same clock, so the numbers cannot be the defect this
+          // check exists to catch. Content and order are still compared exactly, the interleaving
+          // of the two streams included; a scanner that drops, invents or reorders a step still
+          // fails here.
+          JSON.stringify(contentSequence(authoritative, [])) !==
+          JSON.stringify(contentSequence(current, interjections));
+    if (diverged) {
       throw new Error(
         "the streamed turn and the finished turn do not describe the same board. The scan and the " +
           "parse disagreed, so the learner was shown something other than what was taught — refuse " +

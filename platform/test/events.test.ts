@@ -6,6 +6,7 @@ import { assertBlackboardEvent } from "../src/events/types.ts";
 import {
   appendEvent,
   appendNarration,
+  appendQuestion,
   deserializeLog,
   emptyLog,
   eventsInOrder,
@@ -133,4 +134,37 @@ test("events can be read in timeline order regardless of insertion order", () =>
   // is exactly the distinction the union is there to enforce.
   const ids = eventsInOrder(log).map((event) => (event.kind === "text" ? event.id : event.kind));
   assert.deepEqual(ids, ["earlier", "later"]);
+});
+
+// ------------------------------------------- questions the learner asked (ADR 0008) --
+
+test("a question asked mid-lesson survives a storage round trip", () => {
+  let log = emptyLog("q1");
+  log = appendQuestion(log, { at: 0, text: "时区和偏移量到底是什么关系？", outcome: "answered" });
+  log = appendQuestion(log, { at: 1, text: "闰秒呢？", outcome: "refused" });
+
+  const restored = deserializeLog(serializeLog(log));
+  assert.deepEqual(restored.questions, log.questions);
+  assert.equal(nextAt(log), 2, "a question takes its own position on the shared timeline");
+});
+
+test("a log written before questions were recorded still loads", () => {
+  // Same reason as the answers section: the field is additive, and the alternative is losing
+  // a learner's history to a field rename.
+  const legacy = JSON.stringify({ sessionId: "old", narration: [], events: [] });
+  assert.deepEqual(deserializeLog(legacy).questions, []);
+});
+
+test("a question needs the learner's words and a real outcome", () => {
+  assert.throws(
+    () => appendQuestion(emptyLog("q2"), { at: 0, text: "   ", outcome: "answered" }),
+    /learner's words/,
+  );
+  assert.throws(
+    () =>
+      deserializeLog(
+        JSON.stringify({ sessionId: "s", questions: [{ at: 0, text: "x", outcome: "shrugged" }] }),
+      ),
+    /outcome/,
+  );
 });

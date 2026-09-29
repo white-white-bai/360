@@ -134,6 +134,56 @@ export const PROBE_CONCERN_MISCONCEPTION = JSON.stringify({
   misconceptionId: "M-dst-is-just-a-shift",
 });
 
+/** The claims a mid-lesson answer rests on (ADR 0008), cited like the lesson's. */
+export const ANSWER_PLAN = JSON.stringify({
+  assertions: [
+    {
+      id: "A1",
+      kind: "grounded",
+      statement: "时区是一套规则，偏移量是某个时刻这套规则给出的取值",
+      sources: ["P-zone-is-a-set-of-rules"],
+    },
+    {
+      id: "A2",
+      kind: "scaffold",
+      statement: "像一本规则手册和某一页上的读数",
+      sources: [],
+    },
+  ],
+});
+
+export const ANSWER_VERDICTS_OK = JSON.stringify({
+  verdicts: [
+    { id: "A1", ok: true, reason: "" },
+    { id: "A2", ok: true, reason: "scaffold, nothing to support" },
+  ],
+});
+
+/** One claim the cited passage does not support, so the answer must be refused. */
+export const ANSWER_VERDICTS_UNSUPPORTED = JSON.stringify({
+  verdicts: [
+    {
+      id: "A1",
+      ok: false,
+      reason: "the passage says a zone is a set of rules, but nothing here relates it to a reading taken at a moment",
+    },
+    { id: "A2", ok: true, reason: "scaffold" },
+  ],
+});
+
+/** The explainer declining before it writes any claim. */
+export const ANSWER_DECLINE = JSON.stringify({
+  cannotAnswer: "这个问题问的方向，语料里没有覆盖",
+});
+
+export const ANSWER_NARRATION = JSON.stringify({
+  steps: [
+    { say: "好问题。偏移量是读数，时区是那本规则手册。" },
+    { event: { kind: "text", id: "qa1", body: "时区 = 规则手册；偏移量 = 某一页的读数" } },
+    { say: "同一本手册在不同日期翻到不同的页，所以固定偏移量迟早会错。" },
+  ],
+});
+
 /** A script where everything passes: no probe raises a concern and the check passes. */
 export function cleanScript(): Record<string, string | string[]> {
   return {
@@ -142,6 +192,27 @@ export function cleanScript(): Record<string, string | string[]> {
     "probe-author": APPARATUS_PROBES,
     "probe-evaluator": [PROBE_NO_CONCERN, PROBE_NO_CONCERN],
     challenger: APPARATUS_CHALLENGE,
+  };
+}
+
+/**
+ * The clean script with one mid-lesson question answered.
+ *
+ * The explainer is called again inside the narration — claims for the answer,
+ * then the answer's own narration — so the sequence gains two entries before
+ * the lesson's retry, which is what a real session's call order looks like.
+ */
+export function answeredQuestionScript(): Record<string, string | string[]> {
+  return {
+    ...cleanScript(),
+    "lead-explainer": [
+      APPARATUS_LIST,
+      APPARATUS_NARRATION,
+      ANSWER_PLAN,
+      ANSWER_NARRATION,
+      APPARATUS_RETRY,
+    ],
+    "grounding-verifier": [APPARATUS_VERDICTS_OK, ANSWER_VERDICTS_OK],
   };
 }
 
