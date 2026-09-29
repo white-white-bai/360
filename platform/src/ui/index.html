@@ -316,6 +316,11 @@ source.addEventListener("done", (message) => {
   const result = JSON.parse(message.data);
   const final = result.retaken ? "重考" : "首考";
   status.textContent = `${result.passed ? "通过" : "未通过"}（${final} · ${result.checkId}）`;
+  if (result.saved === true) {
+    // The learner has to be TOLD the name of their own record, or coming back tomorrow is
+    // something only the experiment can do.
+    said.textContent = `这节课记下来了：${result.sessionId} — 明天回来跑 npm run enter -- --followup ${result.sessionId}`;
+  }
   source.close();
 });
 

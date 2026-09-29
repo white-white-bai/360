@@ -139,6 +139,10 @@ test("with the page as the learner, the board asks and WAITS", async () => {
     assert.match(text, /event: heard/, "and the answer reached the session");
     assert.match(text, /时区是规则/, "the page is told what it heard");
     assert.match(text, /event: done/, "and the session reached its own verdict");
+    // The page has to be able to NAME the record, or a lesson taken in a browser is one nobody
+    // can come back to — and coming back is the only thing that makes retention mean anything.
+    assert.match(text, /"sessionId":"board-/, "the verdict carries the session it belongs to");
+    assert.match(text, /"saved":true/, "and says whether it was kept");
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

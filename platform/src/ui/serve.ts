@@ -15,6 +15,8 @@ import { render } from "../render/render.ts";
 import { runApparatusSession } from "../session/apparatus.ts";
 import type { Probe } from "../session/contracts.ts";
 import { misconceptionScript } from "../session/fixtures-apparatus.ts";
+import { FileSessionStore } from "../session/store.ts";
+import type { SessionStore } from "../session/store.ts";
 
 /**
  * The blackboard, on a screen.
@@ -52,6 +54,14 @@ export interface BoardOptions {
    * reads the stream to its end. `?learner=1` turns the page into the learner.
    */
   askLearner?: boolean;
+  /**
+   * Where the lesson is kept.
+   *
+   * A lesson nobody recorded is a lesson that cannot be returned to, and coming back is the only
+   * way the retention and transfer measures ever say anything about a person. The same store
+   * `npm run enter` uses, so a lesson taken in the browser is followed up with the same command.
+   */
+  store?: SessionStore;
 }
 
 /** How long a question waits for the page before it is treated as unanswered. */
@@ -174,6 +184,8 @@ export function createBoardServer(options: BoardOptions = {}): Server {
      */
     const learner = url.searchParams.get("learner") === "1" || options.askLearner === true;
     const token = `${Date.now()}-${Math.floor(Math.random() * 1_000_000_000)}`;
+    const sessionId = `board-${Date.now()}`;
+    const store = options.store ?? new FileSessionStore();
 
     const put = async (kind: string, prompt: string, skippable: boolean): Promise<string> => {
       send("question", { token, kind, prompt, skippable });
@@ -231,7 +243,8 @@ export function createBoardServer(options: BoardOptions = {}): Server {
           probeAnswers: profile.probeAnswers,
           terminalAnswer: profile.terminalAnswer,
           retryAnswer: profile.retryAnswer,
-          sessionId: `board-${Date.now()}`,
+          sessionId,
+          store,
           // Each step redraws from the events, so the page never has to merge.
           onStep: (log) => send("surface", { surface: render(log.events), narration: log.narration }),
         });
@@ -243,6 +256,11 @@ export function createBoardServer(options: BoardOptions = {}): Server {
           checkId: final?.checkId ?? null,
           calls: result.usage.calls,
           costUsd: result.usage.costUsd,
+          // Handed to the page so it can tell the learner how to come back. A record nobody can
+          // name is a record nobody returns to, and the whole retention measure is what happens
+          // on the return visit.
+          sessionId,
+          saved: result.saved,
         });
       } catch (error) {
         // A failed session has to reach the page. A server that logs to its own
