@@ -19,6 +19,7 @@
     height: 100vh;
     display: grid;
     grid-template-columns: 30% 1fr;
+    grid-template-rows: auto 1fr auto;
     background: #101a17;
     color: var(--chalk);
     font: 15px/1.65 "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", serif;
@@ -52,6 +53,29 @@
     margin-bottom: 3px;
   }
   #narration .chunk.challenger .who { color: var(--attention); }
+
+  #ask {
+    grid-column: 1 / -1;
+    display: none;
+    gap: 14px;
+    align-items: baseline;
+    padding: 14px 18px;
+    background: #1b2f28;
+    border-top: 2px solid var(--accent);
+  }
+  #ask.open { display: flex; }
+  #ask .prompt { flex: 1; color: var(--chalk); }
+  #ask .hint { color: var(--dim); font-size: 12px; }
+  #ask input {
+    flex: 2; min-width: 12rem; padding: 8px 10px; font: inherit;
+    background: #0e1a17; color: var(--chalk);
+    border: 1px solid var(--grid); border-radius: 3px;
+  }
+  #ask button {
+    padding: 8px 18px; font: inherit; cursor: pointer;
+    background: var(--accent); color: #1b2f28; border: 0; border-radius: 3px;
+  }
+  #said { grid-column: 1 / -1; padding: 0 18px 8px; color: var(--dim); font-size: 12px; }
 
   #board {
     position: relative;
@@ -118,6 +142,14 @@
 
 <div id="narration"><p class="empty">还没有人开口。</p></div>
 <div id="board"><p class="empty">黑板是空的。</p></div>
+
+<form id="ask">
+  <span class="prompt"></span>
+  <span class="hint"></span>
+  <input id="answer" autocomplete="off" />
+  <button type="submit">回答</button>
+</form>
+<div id="said"></div>
 
 <script>
 const board = document.getElementById("board");
@@ -235,6 +267,49 @@ source.addEventListener("surface", (message) => {
   clock.textContent = `已落第 ${landed} 步`;
   draw(payload.surface);
   drawNarration(payload.narration);
+});
+
+const askForm = document.getElementById("ask");
+const answerInput = document.getElementById("answer");
+const said = document.getElementById("said");
+/** The question the session is currently waiting on. Null means it is not waiting on one. */
+let pendingToken = null;
+
+source.addEventListener("question", (message) => {
+  const question = JSON.parse(message.data);
+  pendingToken = question.token;
+  askForm.querySelector(".prompt").textContent = "【问】" + question.prompt;
+  askForm.querySelector(".hint").textContent = question.skippable ? "（直接回车表示跳过）" : "";
+  askForm.classList.add("open");
+  answerInput.value = "";
+  answerInput.focus();
+  // The session is stopped at this moment, so the page has to be where the eyes are.
+  askForm.scrollIntoView({ block: "nearest" });
+});
+
+source.addEventListener("heard", (message) => {
+  const heard = JSON.parse(message.data);
+  // Cleared on the token, not on the submit: the session moves on either way, and a question
+  // that timed out would otherwise leave the page asking for an answer nobody is waiting for.
+  if (heard.token === pendingToken) {
+    pendingToken = null;
+    askForm.classList.remove("open");
+  }
+  said.textContent = heard.answer.trim() === "" ? "（跳过）" : "你答：" + heard.answer;
+});
+
+askForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (pendingToken === null) return;
+  const token = pendingToken;
+  pendingToken = null;
+  askForm.classList.remove("open");
+  fetch("/answer", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token, text: answerInput.value }),
+  });
+  answerInput.value = "";
 });
 
 source.addEventListener("done", (message) => {

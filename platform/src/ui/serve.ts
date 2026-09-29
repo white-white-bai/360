@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import { findCheck } from "../checks/load.ts";
+import type { UnderstandingCheck } from "../checks/types.ts";
 import { composeExpert, loadLibrary } from "../experts/load.ts";
 import { describeExpert } from "../experts/types.ts";
 import { PROFILES } from "../experiment/fixtures-experiment.ts";
@@ -12,6 +13,7 @@ import { ScriptedProvider } from "../providers/scripted.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import { render } from "../render/render.ts";
 import { runApparatusSession } from "../session/apparatus.ts";
+import type { Probe } from "../session/contracts.ts";
 import { misconceptionScript } from "../session/fixtures-apparatus.ts";
 
 /**
@@ -42,6 +44,42 @@ export interface BoardOptions {
    * only on a machine with no credentials.
    */
   provider?: ModelProvider;
+  /**
+   * Ask the PAGE rather than a recorded learner.
+   *
+   * Off by default, and the default is a replay: an unattended `GET /board` has nobody to
+   * answer, so a board that always asked would hang for every script and every test that
+   * reads the stream to its end. `?learner=1` turns the page into the learner.
+   */
+  askLearner?: boolean;
+}
+
+/** How long a question waits for the page before it is treated as unanswered. */
+const ANSWER_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Questions waiting for an answer from the page, by token.
+ *
+ * The board is one connection per learner, and the token is how a POST finds the question it
+ * is answering. Nothing here is keyed by session id: a person with two tabs open is two
+ * learners, and confusing them would put one person's answer in the other's record.
+ */
+const waiting = new Map<string, (answer: string) => void>();
+
+function waitForAnswer(token: string, timeoutMs: number): Promise<string> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      waiting.delete(token);
+      // A question nobody answered is not an error. It is a learner who walked away, and the
+      // session has to be able to finish without them rather than hold a socket open forever.
+      resolve("");
+    }, timeoutMs);
+    waiting.set(token, (answer) => {
+      clearTimeout(timer);
+      waiting.delete(token);
+      resolve(answer);
+    });
+  });
 }
 
 const CHUNK_DELAY_MS = 450;
@@ -57,6 +95,38 @@ export function createBoardServer(options: BoardOptions = {}): Server {
 
   return createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
+
+    if (url.pathname === "/answer" && request.method === "POST") {
+      // The other half of the loop: the page has an answer and is handing it back. The session
+      // is sitting on a promise at this moment, which is what makes the blackboard a lesson
+      // rather than a recording of one.
+      let body = "";
+      request.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      request.on("end", () => {
+        let payload: { token?: unknown; text?: unknown };
+        try {
+          payload = JSON.parse(body) as { token?: unknown; text?: unknown };
+        } catch {
+          response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+          response.end("answer must be JSON");
+          return;
+        }
+
+        const resolve = typeof payload.token === "string" ? waiting.get(payload.token) : undefined;
+        if (resolve === undefined) {
+          // Not 200. A question that is no longer waiting means the session moved on or timed
+          // out, and an answer accepted into nowhere is worse than one refused.
+          response.writeHead(409, { "content-type": "text/plain; charset=utf-8" });
+          response.end("no question is waiting for that token");
+          return;
+        }
+
+        resolve(typeof payload.text === "string" ? payload.text : "");
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        response.end("ok");
+      });
+      return;
+    }
 
     if (url.pathname === "/") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -95,13 +165,57 @@ export function createBoardServer(options: BoardOptions = {}): Server {
       options.provider ?? live?.provider ?? new ScriptedProvider(misconceptionScript(), { chunkDelayMs });
     const profile = PROFILES[1] as (typeof PROFILES)[number];
 
+    /**
+     * Is the PAGE the learner, or is a recorded one answering?
+     *
+     * Off unless asked for. An unattended stream has nobody to answer, so a board that always
+     * put questions would hang every script and every test that reads it to the end — and a
+     * hang is the one failure that looks like nothing happening.
+     */
+    const learner = url.searchParams.get("learner") === "1" || options.askLearner === true;
+    const token = `${Date.now()}-${Math.floor(Math.random() * 1_000_000_000)}`;
+
+    const put = async (kind: string, prompt: string, skippable: boolean): Promise<string> => {
+      send("question", { token, kind, prompt, skippable });
+      const answer = await waitForAnswer(token, ANSWER_TIMEOUT_MS);
+      // Echoed back so the page can clear its input. Without it the page would keep showing a
+      // question the session has already gone past — including the case where it timed out and
+      // the learner is typing into something nobody is listening to.
+      send("heard", { token, answer });
+      return answer.trim();
+    };
+
+    // Only supplied when the page is the learner. Absent keys, not undefined ones: the
+    // apparatus falls back to the recorded answers by their ABSENCE.
+    const asking = learner
+      ? {
+          askProbe: async (probe: Probe): Promise<string | undefined> => {
+            const answer = await put("probe", probe.prompt, true);
+            return answer === "" ? undefined : answer;
+          },
+          askTerminal: async (asked: UnderstandingCheck): Promise<string> => put("check", asked.prompt, false),
+          askRetake: async (asked: UnderstandingCheck): Promise<string | undefined> => {
+            const answer = await put("retake", asked.prompt, true);
+            return answer === "" ? undefined : answer;
+          },
+        }
+      : {};
+
     send("meta", {
       mode: live === null ? "fixture" : "live",
-      expert: `${describeExpert(expert)} · 学习者：${profile.name}`,
+      expert: `${describeExpert(expert)} · ${learner ? "学习者是你" : `学习者：${profile.name}`}`,
       detail:
         live === null
           ? `夹具回放 · 每步 ${chunkDelayMs}ms`
           : (live?.describe ?? "live"),
+      learner,
+    });
+
+    // The learner closed the tab. The session must not sit on a question for ten minutes
+    // waiting for an answer that is not coming: it is told nobody is there, in the same shape as
+    // a skip, and it reaches its own end.
+    request.on("close", () => {
+      waiting.get(token)?.("");
     });
 
     void (async () => {
@@ -110,6 +224,7 @@ export function createBoardServer(options: BoardOptions = {}): Server {
           expert,
           check,
           retakeCheck,
+          ...asking,
           // No injected list. The board shows the WHOLE loop, list generation
           // included — an experiment needs the claims held constant, a demonstration
           // does not.

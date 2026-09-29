@@ -74,6 +74,76 @@ test("the streamed session shows the whole loop, ending on the retake", async ()
   });
 });
 
+test("an answer for a token nobody is waiting on is refused", async () => {
+  // 409, not 200. A question that is no longer waiting means the session moved on or timed out,
+  // and an answer accepted into nowhere is worse than one refused — it would look delivered.
+  await withBoard(async (base) => {
+    const response = await fetch(`${base}/answer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "no-such-token", text: "x" }),
+    });
+    assert.equal(response.status, 409);
+  });
+});
+
+test("with the page as the learner, the board asks and WAITS", async () => {
+  // The whole point of the two-way board: the session stops at a question instead of running to
+  // the end and reading recorded answers. Without this the page is a recording of a lesson.
+  const server = createBoardServer({ chunkDelayMs: 0, askLearner: true });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    const response = await fetch(`${base}/board`);
+    const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+
+    // A cursor rather than a search from the end: reading to the "next" thing has to mean the
+    // next one after what has already been consumed, or every iteration finds the first question
+    // again and answers a token that is already spent.
+    let cursor = 0;
+    const readUntil = async (needle: string): Promise<boolean> => {
+      for (;;) {
+        const found = text.indexOf(needle, cursor);
+        if (found !== -1) {
+          cursor = found + needle.length;
+          return true;
+        }
+        const { value, done } = await reader.read();
+        if (done) return false;
+        text += decoder.decode(value, { stream: true });
+      }
+    };
+
+    // Answer every question until the session stops asking. Answering one and walking away would
+    // leave it waiting on the next — a real thing a learner can do, and its own problem, but not
+    // something a test may leave hanging.
+    let asked = 0;
+    while (await readUntil("event: question")) {
+      const token = /"token":"([^"]+)"/.exec(text.slice(cursor))?.[1];
+      assert.ok(token !== undefined && token !== "", "each question says which one to answer");
+
+      const posted = await fetch(`${base}/answer`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, text: "时区是规则，偏移量是某一瞬间的结果" }),
+      });
+      assert.equal(posted.status, 200, "an answer to a waiting question is accepted");
+      asked += 1;
+    }
+
+    assert.ok(asked >= 1, "at least one question was put to the page");
+    assert.match(text, /event: heard/, "and the answer reached the session");
+    assert.match(text, /时区是规则/, "the page is told what it heard");
+    assert.match(text, /event: done/, "and the session reached its own verdict");
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("a broken session reaches the page instead of an empty board", async () => {
   // A provider that fails on the very first turn, so nothing lands. A server that
   // logged this to its own console and left the board blank would show a learner an
