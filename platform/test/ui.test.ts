@@ -329,6 +329,7 @@ test("the page carries the entry panel: what, how, who teaches, who challenges, 
     const html = await (await fetch(`${base}/`)).text();
     const ids = [
       "setup",
+      "pick-mode",
       "pick-topic",
       "catalogue",
       "draft-line",
@@ -340,6 +341,7 @@ test("the page carries the entry panel: what, how, who teaches, who challenges, 
       "setup-result",
       "start",
       "askq",
+      "askq-send",
       "review",
       "review-name",
       "review-boundary",
@@ -366,6 +368,14 @@ test("the page carries the entry panel: what, how, who teaches, who challenges, 
     assert.match(html, /\/draft\?id=/, "the review is fetched from the board, not hand-rolled in the page");
     assert.match(html, /\/sign"/, "and the signature posts to the same gate the CLI uses");
     assert.match(html, /stoppedBefore/, "a stop before teaching is rendered as its own outcome");
+    // The direct classroom (ADR 0011) is a door of its own: a mode chosen before the subject,
+    // messages that go to /say, and its own events on the same stream.
+    assert.match(html, /name="how"/, "the mode is chosen at entry");
+    assert.doesNotMatch(html, /<select[^>]*name="how"/, "as a choice, not a dropdown");
+    assert.match(html, /\/classroom\?/, "the classroom opens on its own endpoint");
+    assert.match(html, /\/say"/, "and the learner's messages post to /say");
+    assert.match(html, /addEventListener\("turn"/, "the page renders the classroom's turns");
+    assert.match(html, /addEventListener\("closed"/, "and lets an idle classroom go");
     // A stream that ends is not reopened: EventSource reconnects by itself, and a reconnect
     // would rerun the session — or the build — from the top. Every terminal event closes it.
     assert.match(html, /addEventListener\("failed"[\s\S]{0,600}?source\.close\(\)/, "failed closes the stream");
@@ -910,4 +920,91 @@ test("a question queued behind the check is dropped when the lesson ends, and th
     },
     new ScriptedProvider(answeredQuestionScript()),
   );
+});
+
+test("the direct classroom opens on a topic and answers the learner in context", async () => {
+  const requests: Array<{ actor: string; input: string }> = [];
+  const inner = new ScriptedProvider({
+    "lead-explainer": [
+      "先讲第一点：时区是一套规则。用你自己的话说说？",
+      "对——规则先于偏移量。接着看第二个点。",
+    ],
+  });
+  const capturing: ModelProvider = {
+    complete: async (request) => {
+      requests.push({ actor: request.actor, input: request.input });
+      return inner.complete(request);
+    },
+  };
+
+  await withBoard(
+    async (base) => {
+      const classroom = boardReader(
+        await fetch(
+          `${base}/classroom?topic=${encodeURIComponent("时区")}` +
+            "&persona=patient-explainer&style=analogy-heavy&challenger=terse-engineer",
+        ),
+      );
+
+      // The opening: the session says what it is before anyone speaks, then the teacher starts.
+      assert.ok(await classroom.readUntil("event: ready"), "the first turn finishes");
+      assert.match(classroom.all(), /"classroom":true/, "the mode is said out loud");
+      assert.match(classroom.all(), /"unverified":true/, "including that nothing here is verified");
+      assert.match(classroom.all(), /时区是一套规则/, "and the teacher's first turn reaches the page");
+      assert.ok(requests[0]?.input.includes("我想学：时区"), "the subject is the first thing said");
+
+      const token = /"token":"([^"]+)"/.exec(classroom.all())?.[1];
+      assert.ok(token !== undefined && token !== "", "the page needs the token before it can speak");
+
+      // The learner's message goes straight into the model's context — that is the mode.
+      const said = "我猜时区就是太阳的位置";
+      const posted = await fetch(`${base}/say`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token, text: said }),
+      });
+      assert.equal(posted.status, 200, "a message is accepted while the teacher is not speaking");
+
+      assert.ok(await classroom.readUntil("event: ready"), "the second turn finishes");
+      assert.match(classroom.all(), /规则先于偏移量/, "the reply reaches the page");
+      assert.ok(requests[1]?.input.includes(`学习者：${said}`), "the learner's words are in the model's context");
+      assert.ok(requests[1]?.input.includes("主讲：先讲第一点"), "with the conversation behind them");
+      assert.match(classroom.all(), /"calls":2/, "and the ledger counts both turns");
+
+      await classroom.close();
+    },
+    capturing,
+  );
+});
+
+test("a message nobody is waiting for is refused, like an answer into nowhere", async () => {
+  await withBoard(async (base) => {
+    const nowhere = await fetch(`${base}/say`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "nobody", text: "在吗" }),
+    });
+    assert.equal(nowhere.status, 409);
+
+    const empty = await fetch(`${base}/say`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: "nobody", text: "   " }),
+    });
+    assert.equal(empty.status, 400, "an empty message is not a message");
+  });
+});
+
+test("the classroom needs a subject, and a voice it was offered", async () => {
+  await withBoard(async (base) => {
+    const noTopic = await (await fetch(`${base}/classroom`)).text();
+    assert.match(noTopic, /event: failed/);
+    assert.match(noTopic, /先写一个主题/);
+
+    const unknownVoice = await (await fetch(`${base}/classroom?topic=x&persona=not-a-persona`)).text();
+    assert.match(unknownVoice, /not an offered persona/);
+
+    const unknownModel = await (await fetch(`${base}/classroom?topic=x&model=nope`)).text();
+    assert.match(unknownModel, /not one of the offered models/);
+  });
 });

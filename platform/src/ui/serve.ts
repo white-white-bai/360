@@ -20,6 +20,8 @@ import type { ModelProvider } from "../providers/types.ts";
 import { render } from "../render/render.ts";
 import { runApparatusSession } from "../session/apparatus.ts";
 import type { Probe } from "../session/contracts.ts";
+import { runClassroomTurn } from "../session/classroom.ts";
+import type { ClassroomMessage } from "../session/classroom.ts";
 import { misconceptionScript } from "../session/fixtures-apparatus.ts";
 import { FileSessionStore } from "../session/store.ts";
 import type { SessionStore } from "../session/store.ts";
@@ -143,6 +145,39 @@ const questionBoxes = new Map<string, { pending: string | undefined }>();
 const CHUNK_DELAY_MS = 450;
 const HTML = readFileSync(new URL("./index.html", import.meta.url), "utf8");
 
+/**
+ * Where the direct classroom waits for the learner's next message (ADR 0011).
+ *
+ * One message at a time: `open` is true only while the teacher is not speaking, and a message
+ * that arrives mid-turn is refused rather than queued — the learner can see the reply they are
+ * about to be answering, and words typed against the wrong turn are worse than a retry.
+ */
+interface SayBox {
+  open: boolean;
+  resolve: ((text: string) => void) | null;
+}
+
+const sayBoxes = new Map<string, SayBox>();
+
+function waitForSay(box: SayBox, timeoutMs: number): Promise<string> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      // Silence is an idle classroom, not an error: nobody said anything for long enough that
+      // the session lets go rather than holding a socket open for a person who has gone.
+      box.resolve = null;
+      box.open = false;
+      resolve("");
+    }, timeoutMs);
+    box.open = true;
+    box.resolve = (text) => {
+      clearTimeout(timer);
+      box.resolve = null;
+      box.open = false;
+      resolve(text);
+    };
+  });
+}
+
 export function createBoardServer(options: BoardOptions = {}): Server {
   const chunkDelayMs = options.chunkDelayMs ?? CHUNK_DELAY_MS;
 
@@ -239,6 +274,47 @@ export function createBoardServer(options: BoardOptions = {}): Server {
         }
 
         box.pending = text;
+        response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+        response.end("ok");
+      });
+      return;
+    }
+
+    if (url.pathname === "/say" && request.method === "POST") {
+      // The learner speaking in the direct classroom (ADR 0011). Their words go straight into the
+      // model's context — that is what the mode is — so the checks here are only the ones that
+      // keep the conversation from talking over itself.
+      let body = "";
+      request.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+      request.on("end", () => {
+        let payload: { token?: unknown; text?: unknown };
+        try {
+          payload = JSON.parse(body) as { token?: unknown; text?: unknown };
+        } catch {
+          response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+          response.end("say must be JSON");
+          return;
+        }
+
+        const text = typeof payload.text === "string" ? payload.text.trim() : "";
+        if (text === "") {
+          response.writeHead(400, { "content-type": "text/plain; charset=utf-8" });
+          response.end("a message must be the learner's words, not an empty string");
+          return;
+        }
+
+        const box = typeof payload.token === "string" ? sayBoxes.get(payload.token) : undefined;
+        if (box === undefined || box.resolve === null) {
+          // 409, like an answer into nowhere: the teacher is mid-turn, or the classroom is over.
+          response.writeHead(409, { "content-type": "text/plain; charset=utf-8" });
+          response.end("no classroom is waiting for a message with that token");
+          return;
+        }
+
+        const resolve = box.resolve;
+        box.resolve = null;
+        box.open = false;
+        resolve(text);
         response.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
         response.end("ok");
       });
@@ -369,6 +445,150 @@ export function createBoardServer(options: BoardOptions = {}): Server {
     if (url.pathname === "/") {
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(HTML);
+      return;
+    }
+
+    if (url.pathname === "/classroom") {
+      // The direct classroom (ADR 0011): a conversation instead of a verified lesson. Nothing here
+      // is grounded, and the session says so for its whole length — no corpus is loaded, no
+      // assertion is checked, no verdict is reached. The recorded replay cannot stand in for a
+      // provider here: its lines were written for a lesson that was verified first.
+      response.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-cache",
+        connection: "keep-alive",
+      });
+
+      let gone = false;
+      const send = (event: string, data: unknown): void => {
+        if (gone) return;
+        response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const topic = (url.searchParams.get("topic") ?? "").trim();
+      if (topic === "") {
+        send("failed", "直接课堂要先写一个主题——写你想学的那个东西，老师就讲它");
+        response.end();
+        return;
+      }
+
+      let library: ReturnType<typeof freshLibrary>;
+      let offered: ReturnType<typeof catalogue>;
+      try {
+        library = freshLibrary();
+        offered = catalogue(library);
+      } catch (error) {
+        send("failed", `读不到教材目录：${error instanceof Error ? error.message : String(error)}`);
+        response.end();
+        return;
+      }
+
+      const wantedPersona = url.searchParams.get("persona") ?? RECORDED.persona;
+      const wantedStyle = url.searchParams.get("style") ?? RECORDED.style;
+      const wantedChallenger = url.searchParams.get("challenger") ?? wantedPersona;
+      const wantedModel = url.searchParams.get("model");
+
+      // The same door rule as the board (ADR 0007): an id nobody offered is a typo, and a typo
+      // that reached the composition would surface as a broken session instead of a refusal.
+      const choices = [
+        { what: "style", id: wantedStyle, offered: offered.styles },
+        { what: "persona", id: wantedPersona, offered: offered.personas },
+        { what: "persona", id: wantedChallenger, offered: offered.personas },
+      ];
+      const unknown = choices.find((choice) => !choice.offered.some((option) => option.id === choice.id));
+      if (unknown !== undefined) {
+        send(
+          "failed",
+          `\`${unknown.id}\` is not an offered ${unknown.what}: ${unknown.offered.map((option) => option.id).join(", ")}`,
+        );
+        response.end();
+        return;
+      }
+      if (wantedModel !== null && !models.includes(wantedModel)) {
+        send("failed", `\`${wantedModel}\` is not one of the offered models: ${models.join(", ") || "(none)"}`);
+        response.end();
+        return;
+      }
+
+      const selection = selectLiveProvider(process.env, wantedModel === null ? {} : { model: wantedModel });
+      const provider = options.provider ?? selection?.provider ?? null;
+      if (provider === null) {
+        send("failed", "直接课堂要接上真模型——先把环境变量配好（见 npm run probe），它不播录播");
+        response.end();
+        return;
+      }
+
+      const persona = library.personas.get(wantedPersona);
+      const style = library.styles.get(wantedStyle);
+      const challenger = library.personas.get(wantedChallenger);
+      if (persona === undefined || style === undefined || challenger === undefined) {
+        // Unreachable: the ids were validated against this same catalogue just above.
+        send("failed", "课堂上少了主讲、风格或质疑者——重新选一次");
+        response.end();
+        return;
+      }
+
+      const history: ClassroomMessage[] = [];
+      const token = `${Date.now()}-${Math.floor(Math.random() * 1_000_000_000)}`;
+      const box: SayBox = { open: false, resolve: null };
+      sayBoxes.set(token, box);
+
+      send("meta", {
+        classroom: true,
+        expert:
+          `直接课堂：${topic} · 主讲：${persona.name}` +
+          (challenger.id === persona.id ? "" : ` · 质疑者：${challenger.name}`) +
+          ` · 风格：${style.name}`,
+        detail: options.provider !== undefined ? "an injected provider" : (selection?.describe ?? ""),
+        unverified: true,
+        token,
+      });
+
+      request.on("close", () => {
+        gone = true;
+        box.open = false;
+        const wake = box.resolve;
+        box.resolve = null;
+        wake?.("");
+        sayBoxes.delete(token);
+      });
+
+      let calls = 0;
+      let costUsd = 0;
+
+      const speak = async (message: string): Promise<void> => {
+        const result = await runClassroomTurn({ provider, setup: { persona, style, challenger, topic }, history, message });
+        calls += result.usage.calls;
+        costUsd += result.usage.costUsd;
+        history.push({ role: "learner", text: message });
+        for (const turn of result.turns) {
+          send("turn", turn);
+          history.push({ role: "teacher", actor: turn.actor, text: turn.text });
+        }
+        send("ready", { calls, costUsd });
+      };
+
+      void (async () => {
+        try {
+          await speak(`我想学：${topic}`);
+          for (;;) {
+            const said = await waitForSay(box, ANSWER_TIMEOUT_MS);
+            if (gone) break;
+            if (said === "") {
+              send("closed", { reason: "idle" });
+              break;
+            }
+            await speak(said);
+          }
+        } catch (error) {
+          // A dead turn has to reach the page: the classroom keeps no record to inspect
+          // afterwards, so the page and the console are the only places it can be said.
+          const message = error instanceof Error ? error.message : String(error);
+          console.error(`[classroom ${token}] ${message}`);
+          send("failed", message);
+        }
+        response.end();
+      })();
       return;
     }
 

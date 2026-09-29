@@ -99,6 +99,11 @@
     background: #2c4a42; color: var(--chalk); border: 0; border-radius: 3px;
   }
 
+  /* The direct classroom (ADR 0011): a conversation, so the transcript is the whole stage —
+     the blackboard stays where it belongs, in the mode that draws on it. */
+  body.classroom { grid-template-columns: 1fr; }
+  body.classroom #board { display: none; }
+
   /* The entry panel (ADR 0009): who teaches, who challenges, which model. */
   #setup {
     position: fixed; inset: 0; z-index: 10;
@@ -118,6 +123,9 @@
     margin: 10px 0;
   }
   #setup .field { align-items: start; }
+  #setup .modes { display: grid; gap: 6px; }
+  #setup .mode { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: baseline; }
+  #setup .mode-note { display: block; color: var(--dim); font-size: 12px; }
   #setup .field-label { padding-top: 6px; }
   #setup .row[hidden] { display: none; }
   #setup select {
@@ -223,7 +231,20 @@
 <div id="setup">
   <div class="card">
     <h1>黑板</h1>
-    <p class="sub">选学什么、怎么教、谁来上课，然后开始。课中随时可以提问。</p>
+    <p class="sub">直接课堂现在就讲；教材课先有逐句可追溯的教材。选完就开始。</p>
+    <div class="field">
+      <span class="field-label">怎么上</span>
+      <div class="field-body modes" id="pick-mode">
+        <label class="mode">
+          <input type="radio" name="how" value="classroom" checked />
+          <span><b>直接课堂</b><span class="mode-note">现在就讲——模型现场回答，未经过语料校验</span></span>
+        </label>
+        <label class="mode">
+          <input type="radio" name="how" value="lesson" />
+          <span><b>教材课</b><span class="mode-note">先匹配或现做教材——逐句可追溯到语料，可签字保存</span></span>
+        </label>
+      </div>
+    </div>
     <div class="field">
       <span class="field-label">学什么</span>
       <div class="field-body">
@@ -279,7 +300,7 @@
 <form id="askq">
   <span class="hint">课中随时可以提问；老师讲到下一句时会接住。Enter 发送，Shift+Enter 换行。</span>
   <textarea id="askq-text" rows="2" placeholder="关于刚才讲的内容，想问点什么？"></textarea>
-  <button type="submit">提问</button>
+  <button type="submit" id="askq-send">提问</button>
 </form>
 <div id="said"></div>
 
@@ -291,9 +312,18 @@ const who = document.getElementById("who");
 const clock = document.getElementById("clock");
 const askqForm = document.getElementById("askq");
 const askqInput = document.getElementById("askq-text");
+const askqHint = askqForm.querySelector(".hint");
+const askqSend = document.getElementById("askq-send");
 const said = document.getElementById("said");
 
-const ROLE = { "lead-explainer": "主讲", challenger: "质疑者" };
+const ROLE = { "lead-explainer": "主讲", challenger: "质疑者", learner: "你" };
+
+/** What the bar says in a lesson, so the classroom can put it back and vice versa (ADR 0011). */
+const LESSON_ASKQ = {
+  hint: "课中随时可以提问；老师讲到下一句时会接住。Enter 发送，Shift+Enter 换行。",
+  placeholder: "关于刚才讲的内容，想问点什么？",
+  send: "提问",
+};
 
 /**
  * What each phase of a session is doing, in the learner's terms.
@@ -449,27 +479,77 @@ let learnerMode = false;
 let sessionToken = null;
 /** The probe or check the session is currently waiting on. Null means it is not waiting. */
 let pendingToken = null;
+/** Whether this page is in the direct classroom (ADR 0011), and its transcript so far. */
+let classroomMode = false;
+let classroomChunks = [];
 
 /** Wire one lesson's stream. The page connects when the learner starts, not when it loads. */
 function connect(url) {
   // One attempt at a time: a new connection describes a new attempt, so the counters that
-  // describe it start over with it.
+  // describe it start over with it — the classroom's transcript included.
   landed = 0;
   pendingToken = null;
+  classroomMode = false;
+  classroomChunks = [];
+  document.body.classList.remove("classroom");
+  askqHint.textContent = LESSON_ASKQ.hint;
+  askqInput.placeholder = LESSON_ASKQ.placeholder;
+  askqSend.textContent = LESSON_ASKQ.send;
   const source = new EventSource(url);
 
   source.addEventListener("meta", (message) => {
     const meta = JSON.parse(message.data);
     who.textContent = meta.expert;
-    status.textContent = meta.mode === "live" ? "实时 provider" : "夹具回放";
     learnerMode = meta.learner === true;
     sessionToken = meta.token ?? null;
+
+    if (meta.classroom === true) {
+      // The direct classroom (ADR 0011). The session says which mode it is in for its whole
+      // length, because the one thing this mode may never do is pass for the verified one.
+      classroomMode = true;
+      document.body.classList.add("classroom");
+      narration.innerHTML = '<p class="empty">老师马上开口…</p>';
+      status.textContent = "直接课堂 · 未校验";
+      clock.textContent = "";
+      said.textContent = "（直接课堂：回答由模型现场给出，不查语料、不判分。）";
+      askqForm.classList.add("open");
+      askqHint.textContent = "直接课堂：说你的理解、问你的问题。Enter 发送，Shift+Enter 换行。";
+      askqInput.placeholder = "用你自己的话说说，或直接问…";
+      askqSend.textContent = "说";
+      askqInput.focus();
+      return;
+    }
+
+    status.textContent = meta.mode === "live" ? "实时 provider" : "夹具回放";
     // The question bar belongs to a board where somebody can take a question. A recording has
     // no answer on file, so offering the input there would be offering nothing.
     askqForm.classList.toggle("open", meta.questions === true);
     if (learnerMode && meta.questions !== true) {
       said.textContent = "（这是录制回放：可以答，不能问——提问要接上真模型，加 ?live=1。）";
     }
+  });
+
+  source.addEventListener("turn", (message) => {
+    // Rendered when complete, not streamed (ADR 0011): the reply's last line decides whether the
+    // Challenger speaks, and the marker for that must never reach the learner.
+    const turn = JSON.parse(message.data);
+    classroomChunks.push({ actor: turn.actor, text: turn.text });
+    drawNarration(classroomChunks);
+  });
+
+  source.addEventListener("ready", (message) => {
+    const info = JSON.parse(message.data);
+    clock.textContent = `调用 ${info.calls} 次${info.costUsd > 0 ? ` · 约 $${info.costUsd.toFixed(4)}` : ""}`;
+    said.textContent = "（说完了，轮到你。）";
+    askqInput.focus();
+  });
+
+  source.addEventListener("closed", () => {
+    // Idle, not failed: nobody said anything for long enough that the classroom let go.
+    source.close();
+    status.textContent = "下课";
+    said.textContent = "（太久没说话，这节课先下了。想继续就再开始一节。）";
+    setupPanel.hidden = false;
   });
 
   source.addEventListener("surface", (message) => {
@@ -585,13 +665,16 @@ function connect(url) {
     // Ended is ended: see the draft handler. A reconnect here would rerun the whole session,
     // or the whole build, without anyone asking for it.
     source.close();
-    // The message can be several lines (a build that refused lists every problem), and the
-    // panel comes back with it: a failed attempt should be one edit away from a retry.
+    // The payload is a JSON string, and it is parsed rather than shown raw so a multi-line
+    // reason does not arrive wrapped in quotes. The message can be several lines (a build that
+    // refused lists every problem), and the panel comes back with it: a failed attempt should
+    // be one edit away from a retry.
+    const reason = JSON.parse(message.data);
     status.textContent = "出错";
-    said.textContent = "出错：" + message.data;
+    said.textContent = "出错：" + reason;
     setupResult.className = "result bad";
     setupResult.hidden = false;
-    setupResult.textContent = "上一次没有做成：\n" + message.data;
+    setupResult.textContent = "上一次没有做成：\n" + reason;
     setupPanel.hidden = false;
   });
 }
@@ -612,9 +695,32 @@ askForm.addEventListener("submit", (event) => {
 
 askqForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  if (!learnerMode || sessionToken === null) return;
+  if (sessionToken === null) return;
   const text = askqInput.value.trim();
   if (text === "") return;
+
+  if (classroomMode) {
+    // Straight into the model's context, with the whole conversation behind it — that is what
+    // this mode is (ADR 0011).
+    fetch("/say", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: sessionToken, text }),
+    }).then((response) => {
+      if (response.ok) {
+        askqInput.value = "";
+        classroomChunks.push({ actor: "learner", text });
+        drawNarration(classroomChunks);
+        said.textContent = "（老师正在讲…）";
+      } else {
+        // 409 is the honest case: the teacher is mid-turn, or the classroom is over.
+        said.textContent = "（这会儿说不了：老师正讲着这一轮，等它说完。）";
+      }
+    });
+    return;
+  }
+
+  if (!learnerMode) return;
   fetch("/question", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -641,6 +747,24 @@ askqInput.addEventListener("keydown", (event) => {
 // ---------------------------------------------------------------- the setup --
 
 let offered = null;
+
+const howPicks = [...document.querySelectorAll('input[name="how"]')];
+const how = () => (howPicks.find((pick) => pick.checked) ?? howPicks[0]).value;
+/** What the note says in lesson mode. The classroom's note depends on the choice (ADR 0011). */
+let lessonNote = "";
+
+/** The entry panel answers to the mode first: the topic means different things in each. */
+function howChanged() {
+  const direct = how() === "classroom";
+  topicInput.placeholder = direct
+    ? "输入你想学的主题：直接开讲，不先做教材"
+    : "输入主题：已有的直接上课；没有的，现做一份";
+  setupNote.textContent = direct
+    ? `直接课堂：${offered === null || offered.provider === null ? "模型" : offered.provider} 现场回答，` +
+      "不查语料、不判分；要逐句可追溯的课，切到「教材课」。"
+    : lessonNote;
+}
+for (const pick of howPicks) pick.addEventListener("change", howChanged);
 
 /** One option per offering, with the same one-line detail the terminal prints. */
 function fill(select, entries) {
@@ -702,7 +826,8 @@ function applyOptions(options) {
       modelPick.append(option);
     }
     if (options.defaultModel !== null) modelPick.value = options.defaultModel;
-    setupNote.textContent = `将用 ${options.provider} 上课：输入主题——已有的直接上课；没有的，现做一份（做完在页面上签字，才进目录）。`;
+    for (const pick of howPicks) if (pick.value === "classroom") pick.disabled = false;
+    lessonNote = `将用 ${options.provider} 上课：输入主题——已有的直接上课；没有的，现做一份（做完在页面上签字，才进目录）；或者切到「直接课堂」，现在就讲。`;
   } else {
     // The recording is one take — one Domain, one Style, one voice. Locked rather than hidden:
     // the panel still says what the take contains, it just cannot pretend it could differ, and
@@ -714,8 +839,14 @@ function applyOptions(options) {
     challengerPick.value = options.recorded.persona;
     for (const select of [stylePick, leadPick, challengerPick]) select.disabled = true;
     modelRow.hidden = true;
-    setupNote.textContent = "没有配置 provider：录播只有一节「时间戳、时区与夏令时」。输入它（或「时区」）可以直接上；别的主题做不了新教材。";
+    // The direct classroom is nothing but a provider talking (ADR 0011), and there is no
+    // provider here — locked, and the mode choice falls back to the one take on file.
+    for (const pick of howPicks) if (pick.value === "classroom") pick.disabled = true;
+    const lessonPick = howPicks.find((pick) => pick.value === "lesson");
+    if (lessonPick !== undefined) lessonPick.checked = true;
+    lessonNote = "没有配置 provider：录播只有一节「时间戳、时区与夏令时」。输入它（或「时区」）可以直接上；别的主题做不了新教材，直接课堂也讲不了。";
   }
+  howChanged();
 }
 
 async function fetchOptions() {
@@ -865,10 +996,29 @@ document.getElementById("start").addEventListener("click", () => {
   if (offered === null) return;
   const topic = topicInput.value.trim();
   if (topic === "") {
-    setupNote.textContent = "先写一个主题——已有的直接上课，没有的现做一份。";
+    setupNote.textContent =
+      how() === "classroom"
+        ? "先写一个你想学的主题——老师就讲它。"
+        : "先写一个主题——已有的直接上课，没有的现做一份。";
     topicInput.focus();
     return;
   }
+
+  if (how() === "classroom") {
+    // The subject is not matched against anything and nothing is built: it goes to the model
+    // as the thing to teach (ADR 0011). Same three knobs, no fourth.
+    const params = new URLSearchParams({
+      topic,
+      style: stylePick.value,
+      persona: leadPick.value,
+      challenger: challengerPick.value,
+    });
+    if (modelPick.value !== "") params.set("model", modelPick.value);
+    setupPanel.hidden = true;
+    connect(`/classroom?${params.toString()}`);
+    return;
+  }
+
   const params = new URLSearchParams({ learner: "1", topic });
   if (offered.live) {
     params.set("live", "1");
