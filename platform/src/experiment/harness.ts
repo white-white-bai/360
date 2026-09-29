@@ -42,6 +42,14 @@ export interface TrialInput {
   probeAnswers: readonly string[];
   terminalAnswer: string;
   /**
+   * The learner's answer at the second sitting, when a failed check is retaken.
+   *
+   * Without it a condition that corrects a learner still records them as failed,
+   * and the experiment would measure first attempts rather than teaching — which is
+   * the same mistake the session itself had.
+   */
+  retryAnswer?: string;
+  /**
    * What the learner said they thought they understood, from 0 to 1.
    *
    * ADR 0001 asks for this because fluency produces the illusion of understanding:
@@ -62,6 +70,8 @@ export interface TrialResult {
    */
   listInjected: boolean;
   passed: boolean;
+  /** True when a failed check was retaken, so the result can be read in context. */
+  retaken: boolean;
   diagnosis: string | null;
   probeConcerns: number;
   challengeFired: boolean;
@@ -82,19 +92,23 @@ export async function runTrial(
     check: input.check,
     probeAnswers: input.probeAnswers,
     terminalAnswer: input.terminalAnswer,
+    retryAnswer: input.retryAnswer,
     list: input.list,
     disable: CONDITION_ABLATIONS[condition],
     sessionId: `trial-${condition}`,
   });
 
-  const passed = result.verdict?.verdict === "pass";
+  // The SECOND sitting decides, because passing is the session's end condition.
+  const final = result.verdictAfterRetry ?? result.verdict;
+  const passed = final?.verdict === "pass";
   const selfAssessment = input.selfAssessment ?? null;
   return {
     condition,
     disabled: result.disabled,
     listInjected: result.listInjected,
     passed,
-    diagnosis: result.verdict?.diagnosis?.misconceptionId ?? null,
+    retaken: result.verdictAfterRetry !== null,
+    diagnosis: final?.diagnosis?.misconceptionId ?? null,
     probeConcerns: result.outcomes.filter((outcome) => outcome.concern).length,
     challengeFired: result.challenge.fired,
     calls: result.usage.calls,

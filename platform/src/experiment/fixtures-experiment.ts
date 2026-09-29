@@ -77,6 +77,14 @@ export interface LearnerProfile {
   /** The probe answer, in the order the probes were authored. */
   probeAnswers: string[];
   terminalAnswer: string;
+  /**
+   * The answer at the second sitting, when the learner is re-taught and asked again.
+   *
+   * Leaving it undefined models a learner who stops after failing. That is a real
+   * outcome and worth having in the set: it is the case where the retake cannot
+   * help, and a profile list without it would flatter the apparatus.
+   */
+  retryAnswer?: string;
   /** What the learner said they felt they understood, 0-1. */
   selfAssessment: number;
 }
@@ -96,12 +104,18 @@ export const PROFILES: readonly LearnerProfile[] = [
     name: "catalogued misconception",
     probeAnswers: ["夏令时就是把偏移量改一下"],
     terminalAnswer: "这个本地时间正常存在，只是偏移量不同",
+    // Re-taught and asked again, this learner gets there. The baseline never
+    // re-teaches, so the same person stays failed there — which is the difference
+    // the experiment is trying to see.
+    retryAnswer: "这个本地时间不存在，因为前跳形成了缺口",
     selfAssessment: 0.8,
   },
   {
     name: "unanticipated",
     probeAnswers: ["大概就是时间不一样吧"],
     terminalAnswer: "我猜是下午两点半左右",
+    // Deliberately no retryAnswer: this one stops. A profile list where everyone
+    // comes back would flatter the apparatus.
     selfAssessment: 0.4,
   },
 ];

@@ -6,7 +6,7 @@ import type { Expert } from "../experts/types.ts";
 import { verifyAssertionList } from "../grounding/verify.ts";
 import type { ListVerdict } from "../grounding/verify.ts";
 import type { SessionLog } from "../events/log.ts";
-import { emptyLog } from "../events/log.ts";
+import { appendAnswer, emptyLog, nextAt } from "../events/log.ts";
 import type { LedgerRow } from "../providers/meter.ts";
 import { SpendMeter } from "../providers/meter.ts";
 import type { ModelProvider } from "../providers/types.ts";
@@ -190,6 +190,15 @@ export interface ApparatusInput {
   /** Answers to the probes, in the order the probes were authored. */
   probeAnswers: readonly string[];
   terminalAnswer: string;
+  /**
+   * The learner's answer if they are asked again after a retry.
+   *
+   * ADR 0002 makes "the checks have PASSED" the end condition, so a failed check
+   * leads to the Challenger, a retry, and a second sitting. Leaving this undefined
+   * models a learner who stops instead — which ends the session on the first
+   * verdict, because there is nothing else to go on.
+   */
+  retryAnswer?: string;
   sessionId?: string;
   store?: SessionStore;
   /**
@@ -213,7 +222,16 @@ export interface ApparatusResult {
   probes: Probe[];
   outcomes: ProbeOutcome[];
   challenge: { fired: boolean; triggers: string[] };
+  /** The first sitting. */
   verdict: CheckVerdict | null;
+  /**
+   * The second sitting, when a failed check was retaken.
+   *
+   * This is the one that decides whether the session achieved anything, because
+   * passing is the end condition. Reporting only the first would record a learner
+   * who was re-taught and then succeeded as having failed.
+   */
+  verdictAfterRetry: CheckVerdict | null;
   log: SessionLog;
   surface: Surface;
   usage: LedgerRow;
@@ -309,6 +327,7 @@ export async function runApparatusSession(
         outcomes: [],
         challenge: { fired: false, triggers: [] },
         verdict: null,
+        verdictAfterRetry: null,
         log: emptyLog(sessionId),
         surface: render([]),
         usage: meter.total(),
@@ -360,6 +379,11 @@ export async function runApparatusSession(
         input: JSON.stringify({ probe: probe.prompt, answer }),
       });
       outcomes.push(parseProbeOutcome(outcomeTurn.text, probe.id));
+      // The learner's own words go into the log, which ADR 0002 already treats as a
+      // sensitive record. Keeping them anywhere else would give the most sensitive
+      // half of that record a different lifecycle and a different deletion
+      // guarantee.
+      log = appendAnswer(log, { at: nextAt(log), probeId: probe.id, text: answer });
     }
     phases.push("probe-evaluation");
   }
@@ -396,6 +420,26 @@ export async function runApparatusSession(
     log = applySteps(log, speakProbes(parseExplanation(retryTurn.text).steps, []), "lead-explainer");
   }
 
+  // 10 — the second sitting.
+  //
+  // ADR 0002 makes "the checks have PASSED" the end condition, so a failed check
+  // has to lead somewhere other than the exit. Without this the retry cannot change
+  // the outcome at all, and the apparatus would be judged on its first attempt no
+  // matter how well it corrects — which is a measurement bug, not a design choice.
+  //
+  // Caveat kept in view: this re-uses the SAME check, so it measures "did teaching
+  // to the question work" as much as understanding. A second, distinct check would
+  // be stronger, and the assets do not have one yet.
+  let verdictAfterRetry: CheckVerdict | null = null;
+  if (verdict.verdict === "fail" && input.retryAnswer !== undefined && !off("challenger")) {
+    // Gated on the Challenger being on, because the second sitting belongs to the
+    // remediation path. Ablating the Challenger ablates the retake too — a baseline
+    // that asked the learner again WITHOUT re-teaching them would be measuring a
+    // different intervention rather than a cheaper one.
+    verdictAfterRetry = gradeObjectively(check, input.retryAnswer);
+    phases.push("retake");
+  }
+
   const surface = render(log.events);
 
   let saved = false;
@@ -413,6 +457,7 @@ export async function runApparatusSession(
     outcomes,
     challenge: { fired: triggers.length > 0 && !off("challenger"), triggers },
     verdict,
+    verdictAfterRetry,
     log,
     surface,
     usage: meter.total(),

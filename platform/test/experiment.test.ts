@@ -30,6 +30,7 @@ async function trial(condition: "baseline" | "apparatus", profileIndex: number):
     list,
     probeAnswers: profile.probeAnswers,
     terminalAnswer: profile.terminalAnswer,
+    retryAnswer: profile.retryAnswer,
     selfAssessment: profile.selfAssessment,
   });
 }
@@ -74,13 +75,21 @@ test("a probe concern summons the Challenger in the apparatus and nowhere in the
 });
 
 test("the illusion gap is self-assessment minus the measured result", async () => {
-  const passed = await trial("apparatus", 0);
-  assert.equal(passed.passed, true);
-  assert.equal(passed.illusionGap, 0.9 - 1);
+  const passedFirstTime = await trial("apparatus", 0);
+  assert.equal(passedFirstTime.passed, true);
+  assert.equal(passedFirstTime.illusionGap, 0.9 - 1, "felt 90%, did 100% — under-confident");
 
-  const failed = await trial("apparatus", 1);
-  assert.equal(failed.passed, false);
-  assert.equal(failed.illusionGap, 0.8 - 0);
+  // Profile 2 stops after failing, so no retake carries them.
+  const writtenOff = await trial("apparatus", 2);
+  assert.equal(writtenOff.passed, false);
+  assert.equal(writtenOff.illusionGap, 0.4 - 0, "felt 40%, did 0%");
+
+  // Profile 1 gets there only on the second sitting — and the gap is still computed
+  // against the measured result, not against how the first attempt went.
+  const recovered = await trial("apparatus", 1);
+  assert.equal(recovered.passed, true);
+  assert.equal(recovered.retaken, true);
+  assert.equal(recovered.illusionGap, 0.8 - 1, "felt 80%, did 100%");
 });
 
 test("summarise aggregates per condition, not across them", async () => {
@@ -99,15 +108,11 @@ test("too few trials is inconclusive rather than a conclusion", async () => {
   assert.match(result.reason, /not enough to say anything/);
 });
 
-test("KNOWN GAP: the retry cannot yet move the measured outcome", async () => {
-  // The terminal check is graded BEFORE the Challenger and the retry, so a learner
-  // who fails and is then re-taught is still recorded as having failed. ADR 0002
-  // says "class is over when the checks have PASSED", which implies a retake.
-  //
-  // This test asserts the current behaviour so the gap is visible rather than
-  // described in a comment. When the retake is implemented, the four trials below
-  // should be able to differ — and this test will fail, which is the reminder to
-  // replace it with a real assertion.
+test("the retake lets the apparatus recover a learner the baseline writes off", async () => {
+  // This replaces a test named KNOWN GAP, which asserted that the retry could not
+  // move the measured outcome at all. It could not: the terminal check was graded
+  // before the Challenger ran. ADR 0002 makes passing the end condition, so there is
+  // now a second sitting, and it is the one that counts.
   const trials: TrialResult[] = [];
   for (let index = 0; index < PROFILES.length; index += 1) {
     trials.push(await trial("baseline", index));
@@ -115,7 +120,26 @@ test("KNOWN GAP: the retry cannot yet move the measured outcome", async () => {
   }
 
   const result = compare(trials, 3);
-  assert.equal(result.verdict, "no-difference");
-  assert.equal(result.baseline.passRate, result.apparatus.passRate);
-  assert.match(result.reason, /should be deleted/i);
+  assert.equal(result.verdict, "apparatus-better", result.reason);
+  assert.equal(
+    result.baseline.passRate,
+    1 / 3,
+    "only the learner who got it first time passes unaided — the baseline never re-teaches",
+  );
+  assert.ok(result.apparatus.passRate > result.baseline.passRate);
+});
+
+test("a learner who stops after failing is not carried by the retake", async () => {
+  const profile = PROFILES[2] as (typeof PROFILES)[number];
+  assert.equal(profile.retryAnswer, undefined, "this profile is meant to stop");
+
+  const result = await trial("apparatus", 2);
+  assert.equal(result.retaken, false);
+  assert.equal(result.passed, false, "leaving no second answer must not read as passing");
+});
+
+test("the baseline does not retake, because it never re-teaches", async () => {
+  const result = await trial("baseline", 1);
+  assert.equal(result.retaken, false);
+  assert.equal(result.passed, false);
 });

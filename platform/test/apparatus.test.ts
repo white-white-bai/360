@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { findCheck } from "../src/checks/load.ts";
+import { deserializeLog, serializeLog } from "../src/events/log.ts";
 import { composeExpert, loadLibrary } from "../src/experts/load.ts";
 import { ScriptedProvider } from "../src/providers/scripted.ts";
 import { runApparatusSession } from "../src/session/apparatus.ts";
@@ -158,4 +159,60 @@ test("running past the end of a scripted sequence is an error, not a silent repe
 test("an actor with no script at all is an error", async () => {
   const provider = new ScriptedProvider({ someone: "x" });
   await assert.rejects(() => provider.complete({ actor: "nobody", model: "m", input: "x" }), /no scripted response/);
+});
+
+// ------------------------------------------------- the retake, and the record --
+
+test("a failed check is retaken after the retry, so the retry can actually matter", async () => {
+  const result = await runApparatusSession(new ScriptedProvider(cleanScript()), {
+    expert,
+    check,
+    probeAnswers: [],
+    terminalAnswer: "不知道，随便猜一个",
+    retryAnswer: check.expected,
+    sessionId: "retake",
+  });
+
+  assert.equal(result.verdict?.verdict, "fail", "the first sitting still failed");
+  assert.equal(result.verdictAfterRetry?.verdict, "pass", "the second sitting is the one that counts");
+  assert.ok(result.phases.includes("retake"));
+});
+
+test("without a second answer there is no retake, and the failure stands", async () => {
+  const result = await run(cleanScript(), "不知道，随便猜一个", []);
+  assert.equal(result.verdictAfterRetry, null);
+  assert.ok(!result.phases.includes("retake"), "a learner who stops has not earned a second sitting");
+});
+
+test("learner answers are recorded in the log, beside the blackboard", async () => {
+  const result = await run(cleanScript(), check.expected);
+
+  assert.equal(result.log.answers.length, 2, "one answer per probe that was answered");
+  assert.deepEqual(
+    result.log.answers.map((answer) => answer.probeId),
+    ["Q1", "Q2"],
+  );
+  assert.ok(result.log.answers.every((answer) => answer.text.trim() !== ""));
+});
+
+test("an answer can never be orphaned: it names a probe that was actually asked", async () => {
+  const result = await run(cleanScript(), check.expected);
+  const asked = new Set(result.probes.map((probe) => probe.id));
+  for (const answer of result.log.answers) {
+    assert.ok(asked.has(answer.probeId), `${answer.probeId} is not a probe that was asked`);
+  }
+});
+
+test("the answers survive a storage round trip, like the rest of the record", async () => {
+  const result = await run(cleanScript(), check.expected);
+  const restored = deserializeLog(serializeLog(result.log));
+  assert.deepEqual(restored.answers, result.log.answers);
+});
+
+test("a log written before answers were recorded still loads", async () => {
+  // The field is additive and defaults to empty, because the alternative is a
+  // session that cannot be resumed — losing a learner's history to a field rename
+  // is exactly the quiet breakage this file avoids.
+  const legacy = JSON.stringify({ sessionId: "old", narration: [], events: [] });
+  assert.deepEqual(deserializeLog(legacy).answers, []);
 });
