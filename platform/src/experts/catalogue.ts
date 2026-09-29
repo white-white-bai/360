@@ -60,6 +60,62 @@ export function catalogue(library: Library): Catalogue {
 export class NotOffered extends Error {}
 
 /**
+ * Resolve a typed topic to something the catalogue or the draft shelf holds (ADR 0010) —
+ * conservatively, because a wrong match is worse than none: an unmatched topic goes to the
+ * builder, while a mis-route teaches the wrong subject with full confidence. Matching is
+ * containment on the id and on whole name fragments, never fuzzy distance. Latin fragments are
+ * not split — `utf` out of `UTF-8` would match `utf16`, which is exactly the mis-route this
+ * refuses to make.
+ */
+export type TopicMatch =
+  | { kind: "one"; id: string }
+  | { kind: "none" }
+  | { kind: "ambiguous"; ids: string[] };
+
+/** Anything a typed topic can resolve against: a Domain, or a draft waiting for a signature. */
+export interface TopicEntry {
+  id: string;
+  name: string;
+}
+
+const normaliseTopic = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[\s\u3000、，。·,.\-–—:：()（）]+/g, "");
+
+function segmentsOf(entry: TopicEntry): string[] {
+  const pieces = new Set<string>();
+  const id = normaliseTopic(entry.id);
+  if (id.length >= 2) pieces.add(id);
+  const whole = normaliseTopic(entry.name);
+  if (whole.length >= 2) pieces.add(whole);
+  // Split on Chinese list punctuation and connectives only; a name fragment like «时区» is
+  // what lets "时区到底是什么" resolve without loosening the match any further.
+  for (const part of entry.name.split(/[、，。·：（）()与和及]+/)) {
+    const normalised = normaliseTopic(part);
+    if (normalised.length >= 2) pieces.add(normalised);
+  }
+  return [...pieces];
+}
+
+export function matchTopic(entries: readonly TopicEntry[], topic: string): TopicMatch {
+  const needle = normaliseTopic(topic);
+  if (needle.length < 2) return { kind: "none" };
+
+  const hits = entries.filter((entry) =>
+    segmentsOf(entry).some((segment) => needle.includes(segment) || segment.includes(needle)),
+  );
+
+  if (hits.length === 1) return { kind: "one", id: (hits[0] as TopicEntry).id };
+  if (hits.length === 0) return { kind: "none" };
+  return { kind: "ambiguous", ids: hits.map((entry) => entry.id).sort() };
+}
+
+export function matchDomain(library: Library, topic: string): TopicMatch {
+  return matchTopic([...library.domains.values()], topic);
+}
+
+/**
  * Resolve a learner's choice into an Expert.
  *
  * Refuses anything the Catalogue did not offer, including a plausible-looking id.

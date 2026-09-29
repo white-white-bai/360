@@ -5,6 +5,7 @@ import { findCheck } from "../src/checks/load.ts";
 import { deserializeLog, serializeLog } from "../src/events/log.ts";
 import { composeExpert, loadLibrary } from "../src/experts/load.ts";
 import { ScriptedProvider } from "../src/providers/scripted.ts";
+import type { CompletionRequest, StreamEvent } from "../src/providers/types.ts";
 import { CANNOT_ANSWER, runApparatusSession } from "../src/session/apparatus.ts";
 import {
   ANSWER_DECLINE,
@@ -321,6 +322,30 @@ test("no probe is put to the learner twice", async () => {
   assert.equal(result.log.answers.length, ids.length, "and each answer is recorded once");
 });
 
+/** Wrap a provider so a test can see what was actually asked, actor by actor. */
+function capturing(inner: ScriptedProvider): {
+  provider: { complete: (req: CompletionRequest) => ReturnType<ScriptedProvider["complete"]>; stream: (req: CompletionRequest) => AsyncIterable<StreamEvent> };
+  requests: Array<{ actor: string; system: string }>;
+} {
+  const requests: Array<{ actor: string; system: string }> = [];
+  const note = (req: CompletionRequest): void => {
+    requests.push({ actor: req.actor, system: req.system ?? "" });
+  };
+  return {
+    requests,
+    provider: {
+      complete: (req) => {
+        note(req);
+        return inner.complete(req);
+      },
+      stream: (req) => {
+        note(req);
+        return inner.stream(req);
+      },
+    },
+  };
+}
+
 // ------------------------------------------- a question asked mid-lesson (ADR 0008) --
 
 /** Run the apparatus with one question offered at the poll numbered `poll`. */
@@ -400,5 +425,68 @@ test("a broken answer reply is retried once, then refused — and the lesson sur
   assert.equal(result.retries, 1, "the unusable reply is retried once and the retry is counted");
   assert.equal(result.log.questions[0]?.outcome, "refused");
   assert.equal(result.verdict?.verdict, "pass");
+});
+
+// ------------------------------------ who plays the Challenger (ADR 0009) --
+
+test("the Challenger speaks in the voice it was given, and the lead keeps its own", async () => {
+  // A Position is a part and an Expert is a voice: the refutation must come from the chosen
+  // challenger persona, and the lesson must stay in the lead's.
+  const { provider, requests } = capturing(new ScriptedProvider(misconceptionScript()));
+  const challenger = composeExpert(library, "terse-engineer", "analogy-heavy", "time-zones");
+
+  const result = await runApparatusSession(provider, {
+    expert,
+    challenger,
+    check,
+    probeAnswers: PROBE_ANSWERS,
+    terminalAnswer: check.expected,
+  });
+
+  assert.equal(result.challenge.fired, true, "the run must reach the Challenger");
+  const challenge = requests.find((request) => request.actor === "challenger");
+  assert.ok(challenge !== undefined);
+  assert.ok(challenge.system.includes(challenger.persona.name), "the challenge carries the challenger's voice");
+  assert.ok(!challenge.system.includes(expert.persona.name), "and not the lead's — one voice per position");
+  assert.ok(
+    requests.some(
+      (request) => request.actor === "lead-explainer" && request.system.includes(expert.persona.name),
+    ),
+    "every other turn stays with the lead",
+  );
+});
+
+test("with no challenger chosen, the lead plays both parts, as every session before did", async () => {
+  const { provider, requests } = capturing(new ScriptedProvider(misconceptionScript()));
+
+  const result = await runApparatusSession(provider, {
+    expert,
+    check,
+    probeAnswers: PROBE_ANSWERS,
+    terminalAnswer: check.expected,
+  });
+
+  assert.equal(result.challenge.fired, true);
+  const challenge = requests.find((request) => request.actor === "challenger");
+  assert.ok(challenge?.system.includes(expert.persona.name), "the default challenger is the lead's own voice");
+});
+
+// ------------------------------------------- saying what the session is doing --
+
+test("a live page is told each phase as it begins, in the same order as the record", async () => {
+  // The preparation is several model calls long and nothing lands on the board during it. The
+  // report is what keeps a waiting page from looking like a broken one; it must be the same
+  // sequence the record will show, or the page and the transcript would disagree.
+  const reported: string[] = [];
+  const result = await runApparatusSession(new ScriptedProvider(cleanScript()), {
+    expert,
+    check,
+    probeAnswers: PROBE_ANSWERS,
+    terminalAnswer: check.expected,
+    onPhase: (phase) => { reported.push(phase); },
+  });
+
+  assert.deepEqual(reported, result.phases, "the live report and the record are one sequence");
+  assert.equal(reported[0], "assertion-list", "and the first thing said is what is happening first");
 });
 

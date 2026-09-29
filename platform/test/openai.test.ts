@@ -145,6 +145,12 @@ test("an HTTP error is reported with the status and a body snippet", async (t) =
     (error: Error) => {
       assert.match(error.message, /HTTP 429/);
       assert.match(error.message, /rate limited/);
+      // A 403 says the credentials were refused; naming the endpoint says WHERE, so the reader
+      // does not have to guess which of the configured services answered.
+      assert.ok(
+        error.message.includes(`at ${stub.url}/`),
+        "the endpoint that answered is named in the error",
+      );
       assert.ok(
         !error.message.includes("super-secret-key"),
         "an error message is the easiest place to leak a credential",

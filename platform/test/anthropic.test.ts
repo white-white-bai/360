@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { AnthropicProvider, anthropicConfigFromEnv } from "../src/providers/anthropic.ts";
-import { selectLiveProvider } from "../src/providers/live.ts";
+import { configuredModels, defaultModel, selectLiveProvider } from "../src/providers/live.ts";
 import { configFromEnv } from "../src/providers/openai.ts";
 
 const CONFIG = { baseUrl: "https://example.test/v1", apiKey: "secret-key", model: "m", maxTokens: 512 };
@@ -149,6 +149,40 @@ test("Anthropic wins when both are configured, and OpenAI is the fallback", () =
   assert.match(onlyOpenAi?.describe ?? "", /^openai-compatible /);
 
   assert.equal(selectLiveProvider({}), null);
+});
+
+test("the offered models are the list an operator wrote, or the single configured one", () => {
+  assert.deepEqual(configuredModels({ ATP_MODELS: "a, b ,c" }), ["a", "b", "c"]);
+  assert.deepEqual(configuredModels({ ATP_MODEL: "m" }), ["m"]);
+  assert.deepEqual(
+    configuredModels({ ATP_ANTHROPIC_MODEL: "claude", ATP_MODEL: "gpt" }),
+    ["claude"],
+    "the adapter preference decides which single model is on offer",
+  );
+  assert.deepEqual(configuredModels({}), [], "no configuration is no choice, not a default");
+
+  assert.equal(defaultModel({ ATP_MODEL: "m", ATP_MODELS: "a,m" }), "m", "the configured model stays the default");
+  assert.equal(defaultModel({ ATP_MODELS: "a,b" }), "a", "without one configured, the first offered is it");
+  assert.equal(defaultModel({}), null);
+});
+
+test("choosing a model wins over the one in the environment", () => {
+  // ADR 0009: the page's choice is applied where the adapter is chosen — there must not be a
+  // second way to build a provider that the rest of the platform cannot see.
+  const openai = selectLiveProvider(
+    { ATP_API_KEY: "k", ATP_MODEL: "small", ATP_MODELS: "small, big" },
+    { model: "big" },
+  );
+  assert.match(openai?.describe ?? "", /openai-compatible big at/);
+
+  const fallback = selectLiveProvider({ ATP_API_KEY: "k", ATP_MODEL: "small", ATP_MODELS: "small, big" });
+  assert.match(fallback?.describe ?? "", /openai-compatible small at/, "with no choice, the environment's model runs");
+
+  const anthropic = selectLiveProvider(
+    { ANTHROPIC_API_KEY: "k", ANTHROPIC_MODEL: "claude", ATP_MODEL: "gpt" },
+    { model: "claude-big" },
+  );
+  assert.match(anthropic?.describe ?? "", /anthropic claude-big at/);
 });
 
 test("the shared environment readers behave the same for both adapters", () => {

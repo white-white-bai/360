@@ -19,6 +19,15 @@ export const STYLES_DIR = join(LIBRARY_DIR, "styles");
 export const DOMAINS_DIR = join(REPO_ROOT, "domains");
 
 /**
+ * Domains the builder wrote and nobody has signed yet (ADR 0010).
+ *
+ * Outside `domains/` on purpose: the library loads everything it finds there, and a draft that
+ * could be taught before its signature would make the gate decorative. `review-domain` is the
+ * only thing that moves a directory across.
+ */
+export const DOMAIN_DRAFTS_DIR = join(REPO_ROOT, "domains-draft");
+
+/**
  * Session records. SENSITIVE (ADR 0002): a log holds the learner's
  * misconceptions and their own words, so this directory is gitignored and the
  * store can prove a deletion rather than merely attempt one.

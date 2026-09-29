@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NotOffered, catalogue, choose } from "../src/experts/catalogue.ts";
+import { NotOffered, catalogue, choose, matchDomain } from "../src/experts/catalogue.ts";
 import { loadLibrary } from "../src/experts/load.ts";
 
 const library = loadLibrary();
@@ -62,4 +62,29 @@ test("the refusal lists what was on offer, so the mistake is fixable", () => {
     () => choose(library, "typo", "x", "y"),
     (error: Error) => error instanceof NotOffered && error.message.includes("time-zones"),
   );
+});
+
+// ------------------------------------------------- resolving a typed topic (ADR 0010) --
+
+test("a typed topic resolves to a Domain by its id and its name", () => {
+  assert.deepEqual(matchDomain(library, "时区"), { kind: "one", id: "time-zones" });
+  assert.deepEqual(matchDomain(library, "时区到底是什么"), { kind: "one", id: "time-zones" });
+  assert.deepEqual(matchDomain(library, "time-zones"), { kind: "one", id: "time-zones" });
+  assert.deepEqual(matchDomain(library, "utf8"), { kind: "one", id: "utf8-and-length" });
+  assert.deepEqual(matchDomain(library, "字符串长度"), { kind: "one", id: "utf8-and-length" });
+});
+
+test("a topic that matches nothing is none, not the nearest Domain", () => {
+  // ADR 0010: an unmatched topic goes to the builder. A mis-route would teach the wrong
+  // subject with full confidence — `utf16` must not quietly become the UTF-8 lesson.
+  assert.deepEqual(matchDomain(library, "量子力学"), { kind: "none" });
+  assert.deepEqual(matchDomain(library, "utf16"), { kind: "none" });
+  assert.deepEqual(matchDomain(library, "x"), { kind: "none" }, "one character is not a topic");
+});
+
+test("a topic that could be two Domains is ambiguous, and names them", () => {
+  assert.deepEqual(matchDomain(library, "时区与字符串长度"), {
+    kind: "ambiguous",
+    ids: ["time-zones", "utf8-and-length"],
+  });
 });

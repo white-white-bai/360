@@ -8,6 +8,12 @@ platform/dist/
 # learner's misconceptions and their own words. Never commit these.
 platform/.sessions/
 
+# Domain drafts and fetched sources — the builder's working material (ADR 0010).
+# A draft becomes a Domain by signature, not by being committed, and the fetched
+# third-party texts are review evidence rather than library content.
+domains-draft/
+domains/*/sources/
+
 # Personal working preferences — deliberately local. `.commandcode/skills/` is
 # the shareable skills collection and stays tracked; this is the record of how
 # this particular person works, and it is not anyone else's business.

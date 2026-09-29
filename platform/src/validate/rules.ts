@@ -436,3 +436,21 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
   const warnings = findings.filter((f) => f.severity === "warning").length;
   return { findings, errors, warnings, ok: errors === 0 };
 }
+
+/**
+ * Validate ONE Domain directory — the builder's view of a draft (ADR 0010).
+ *
+ * A draft lives outside every library, so it cannot be reached through `validateRepo` without
+ * also validating whatever else happens to be lying around. This runs the same domain rules
+ * against the single directory a signature would move.
+ */
+export function validateDraft(dir: string): ValidationReport {
+  const findings: Finding[] = [];
+  const loaded = safely(dir, () => loadDomain(dir));
+  if (loaded.value !== undefined) findings.push(...validateDomain(loaded.value, dir));
+  if (loaded.problem !== undefined) findings.push(loaded.problem);
+
+  const errors = findings.filter((f) => f.severity === "error").length;
+  const warnings = findings.filter((f) => f.severity === "warning").length;
+  return { findings, errors, warnings, ok: errors === 0 };
+}

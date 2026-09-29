@@ -82,21 +82,85 @@
     grid-column: 1 / -1;
     display: none;
     gap: 14px;
-    align-items: baseline;
+    align-items: flex-end;
     padding: 10px 18px;
     background: #12241e;
     border-top: 1px solid #23372f;
   }
   #askq.open { display: flex; }
   #askq .hint { color: var(--dim); font-size: 12px; }
-  #askq input {
-    flex: 2; min-width: 12rem; padding: 6px 10px; font: inherit;
+  #askq textarea {
+    flex: 2; min-width: 12rem; padding: 6px 10px; font: inherit; resize: vertical;
     background: #0e1a17; color: var(--chalk);
     border: 1px solid var(--grid); border-radius: 3px;
   }
   #askq button {
     padding: 6px 16px; font: inherit; cursor: pointer;
     background: #2c4a42; color: var(--chalk); border: 0; border-radius: 3px;
+  }
+
+  /* The entry panel (ADR 0009): who teaches, who challenges, which model. */
+  #setup {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: center;
+    background: #0b1512;
+  }
+  #setup[hidden] { display: none; }
+  #setup .card {
+    width: min(640px, 94vw);
+    background: #12241e; border: 1px solid #23372f; border-radius: 6px;
+    padding: 26px 28px;
+  }
+  #setup h1 { margin: 0 0 6px; font-size: 20px; color: var(--chalk); }
+  #setup .sub { margin: 0 0 18px; color: var(--dim); font-size: 13px; }
+  #setup .row, #setup .field {
+    display: grid; grid-template-columns: 4.5em 1fr; gap: 10px; align-items: center;
+    margin: 10px 0;
+  }
+  #setup .field { align-items: start; }
+  #setup .field-label { padding-top: 6px; }
+  #setup .row[hidden] { display: none; }
+  #setup select {
+    padding: 6px 8px; font: inherit; background: #0e1a17; color: var(--chalk);
+    border: 1px solid var(--grid); border-radius: 3px;
+  }
+  #setup select:disabled { color: var(--dim); }
+  /* The topic is typed; the Catalogue stays visible underneath, because its length is the
+     honest statement of what can be taught — and it doubles as suggestions. */
+  #setup .field-body { display: grid; gap: 6px; }
+  #setup input[type="text"] {
+    padding: 7px 10px; font: inherit; background: #0e1a17; color: var(--chalk);
+    border: 1px solid var(--grid); border-radius: 3px;
+  }
+  #setup .catalogue { margin: 0; color: var(--dim); font-size: 12px; }
+  #setup .catalogue a { color: var(--chalk); text-decoration: underline dotted; cursor: pointer; }
+  #setup .sweep { display: block; margin-top: 6px; color: var(--chalk); }
+
+  /* The review view (ADR 0010): the material a signature accepts, shown before the name. */
+  #setup h2 { margin: 20px 0 4px; font-size: 16px; color: var(--chalk); }
+  #setup .review-scroll { max-height: 42vh; overflow: auto; margin: 10px 0; padding-right: 6px; }
+  #setup .review-scroll h3 {
+    margin: 0 0 6px; font-size: 12px; font-weight: 500; letter-spacing: .08em; color: var(--dim);
+  }
+  #setup .review-scroll section { margin: 0 0 14px; }
+  #setup .review-scroll .item {
+    margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--grid); border-radius: 3px;
+    background: #0e1a17; font-size: 12.5px;
+  }
+  #setup .review-scroll .item .meta { display: block; margin-bottom: 4px; color: var(--dim); font-size: 11px; }
+  #setup .review-scroll .item .quote { white-space: pre-wrap; overflow-wrap: anywhere; }
+  #setup button.quiet { background: #2c4a42; color: var(--chalk); margin-left: 10px; }
+  #setup .note { margin: 14px 0; color: var(--dim); font-size: 12px; }
+  #setup .result {
+    margin: 12px 0 0; padding: 10px 12px; border-radius: 3px;
+    font-size: 12.5px; white-space: pre-wrap;
+  }
+  #setup .result.bad { background: #2a1714; border: 1px solid var(--attention); color: var(--chalk); }
+  #setup .result.good { background: #14261f; border: 1px solid var(--grid); color: var(--chalk); }
+  #setup .result[hidden] { display: none; }
+  #setup button {
+    padding: 9px 22px; font: inherit; cursor: pointer;
+    background: var(--accent); color: #1b2f28; border: 0; border-radius: 3px;
   }
   #said { grid-column: 1 / -1; padding: 0 18px 8px; color: var(--dim); font-size: 12px; }
 
@@ -156,6 +220,45 @@
 </style>
 </head>
 <body>
+<div id="setup">
+  <div class="card">
+    <h1>黑板</h1>
+    <p class="sub">选学什么、怎么教、谁来上课，然后开始。课中随时可以提问。</p>
+    <div class="field">
+      <span class="field-label">学什么</span>
+      <div class="field-body">
+        <input id="pick-topic" type="text" autocomplete="off" placeholder="输入主题：已有的直接上课；没有的，现做一份" />
+        <p class="catalogue">已有教材：<span id="catalogue"></span></p>
+        <p class="catalogue" id="draft-line" hidden>待签字：<span id="drafts"></span></p>
+      </div>
+    </div>
+    <label class="row"><span>怎么教</span><select id="pick-style"></select></label>
+    <label class="row"><span>主讲人</span><select id="pick-lead"></select></label>
+    <label class="row"><span>质疑者</span><select id="pick-challenger"></select></label>
+    <label class="row" id="model-row"><span>模型</span><select id="pick-model"></select></label>
+    <p class="note" id="setup-note">正在读取可选项…</p>
+    <p class="result" id="setup-result" hidden></p>
+    <button id="start">开始上课</button>
+
+    <div id="review" hidden>
+      <h2 id="review-name"></h2>
+      <p class="note" id="review-boundary"></p>
+      <div id="review-body" class="review-scroll"></div>
+      <p class="result bad" id="review-problems" hidden></p>
+      <p class="note" id="sweep-line" hidden>
+        同主题的其它草稿（来源大多相同）：<span id="sweep-list"></span>
+        <label class="sweep"><input type="checkbox" id="review-sweep" checked /> 签字后一并删除它们</label>
+      </p>
+      <label class="row">
+        <span>签字人</span>
+        <input id="review-signer" type="text" autocomplete="off" placeholder="你的名字（写入 owner 与 corpusReviewedBy）" />
+      </label>
+      <button id="review-sign">签字，放进目录</button>
+      <button id="review-back" class="quiet">返回</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <b>黑板</b>
   <span id="who"></span>
@@ -174,8 +277,8 @@
 </form>
 
 <form id="askq">
-  <span class="hint">课中随时可以提问；老师讲到下一句时会接住。</span>
-  <input id="askq-text" autocomplete="off" placeholder="关于刚才讲的内容，想问点什么？" />
+  <span class="hint">课中随时可以提问；老师讲到下一句时会接住。Enter 发送，Shift+Enter 换行。</span>
+  <textarea id="askq-text" rows="2" placeholder="关于刚才讲的内容，想问点什么？"></textarea>
   <button type="submit">提问</button>
 </form>
 <div id="said"></div>
@@ -191,6 +294,36 @@ const askqInput = document.getElementById("askq-text");
 const said = document.getElementById("said");
 
 const ROLE = { "lead-explainer": "主讲", challenger: "质疑者" };
+
+/**
+ * What each phase of a session is doing, in the learner's terms.
+ *
+ * Between the connection and the first line of speech the session makes several model calls —
+ * claims, verification, probe authoring — and an empty board during them is the product
+ * WORKING, not the product broken. Saying so is the difference between waiting and wondering.
+ * The builder's stages reuse the same channel (ADR 0010): a topic that matches nothing becomes
+ * a draft, and waiting for material is the same kind of wait as waiting for a lesson.
+ */
+const PHASE_LABELS = {
+  "assertion-list": "老师正在定这节课要讲的断言…",
+  "structural-verify": "正在核对每条断言的出处…",
+  "semantic-verify": "正在独立校验：每条断言是否真的由语料支持…",
+  "probe-author": "正在挑几个途中要问你的小问题…",
+  narration: "开讲。",
+  "terminal-check": "课讲完了，轮到你答题。",
+  "probe-evaluation": "老师正在看你刚才的回答…",
+  challenger: "质疑者上场。",
+  "re-teach": "同一份内容，换个讲法再来一遍…",
+  retake: "再答一份新题。",
+  "stopped-before-teaching": "有断言没通过校验，这节课停在这里。",
+  plan: "正在规划这份新教材：教什么、用哪些来源…",
+  fetch: "正在抓取公开来源（原文留档，供审核）…",
+  select: "正在从原文里选段…",
+  prove: "正在逐条证明引文出自原文…",
+  author: "正在起草术语表、误解与检查题…",
+  write: "正在写入草稿…",
+  validate: "正在用同一套校验器检查草稿…",
+};
 
 /** Escape, because the board shows text produced by a model feeding on a corpus. */
 function esc(text) {
@@ -284,61 +417,184 @@ function drawNarration(chunks) {
   narration.scrollTop = narration.scrollHeight;
 }
 
-const source = new EventSource("/board");
+// The entry panel (ADR 0009): who teaches, who challenges, which model — chosen before the
+// session starts, and carried on the connection that starts it.
+const setupPanel = document.getElementById("setup");
+const setupNote = document.getElementById("setup-note");
+const setupResult = document.getElementById("setup-result");
+const reviewPanel = document.getElementById("review");
+const reviewName = document.getElementById("review-name");
+const reviewBoundary = document.getElementById("review-boundary");
+const reviewBody = document.getElementById("review-body");
+const reviewProblems = document.getElementById("review-problems");
+const reviewSigner = document.getElementById("review-signer");
+const sweepLine = document.getElementById("sweep-line");
+const sweepList = document.getElementById("sweep-list");
+const sweepBox = document.getElementById("review-sweep");
+const topicInput = document.getElementById("pick-topic");
+const catalogueLine = document.getElementById("catalogue");
+const draftLine = document.getElementById("draft-line");
+const draftsLine = document.getElementById("drafts");
+const stylePick = document.getElementById("pick-style");
+const leadPick = document.getElementById("pick-lead");
+const challengerPick = document.getElementById("pick-challenger");
+const modelRow = document.getElementById("model-row");
+const modelPick = document.getElementById("pick-model");
+const askForm = document.getElementById("ask");
+const answerInput = document.getElementById("answer");
+
 let landed = 0;
 /** Whether this page is the learner, and the token its questions travel with. */
 let learnerMode = false;
 let sessionToken = null;
-
-source.addEventListener("meta", (message) => {
-  const meta = JSON.parse(message.data);
-  who.textContent = meta.expert;
-  status.textContent = meta.mode === "live" ? "实时 provider" : "夹具回放";
-  learnerMode = meta.learner === true;
-  sessionToken = meta.token ?? null;
-  // The question bar belongs to a board where somebody can take a question. A recording has no
-  // answer on file, so offering the input there would be offering nothing.
-  askqForm.classList.toggle("open", meta.questions === true);
-  if (learnerMode && meta.questions !== true) {
-    said.textContent = "（这是录制回放：可以答，不能问——提问要接上真模型，加 ?live=1。）";
-  }
-});
-
-source.addEventListener("surface", (message) => {
-  const payload = JSON.parse(message.data);
-  landed += 1;
-  clock.textContent = `已落第 ${landed} 步`;
-  draw(payload.surface);
-  drawNarration(payload.narration);
-});
-
-const askForm = document.getElementById("ask");
-const answerInput = document.getElementById("answer");
-/** The question the session is currently waiting on. Null means it is not waiting on one. */
+/** The probe or check the session is currently waiting on. Null means it is not waiting. */
 let pendingToken = null;
 
-source.addEventListener("question", (message) => {
-  const question = JSON.parse(message.data);
-  pendingToken = question.token;
-  askForm.querySelector(".prompt").textContent = "【问】" + question.prompt;
-  askForm.querySelector(".hint").textContent = question.skippable ? "（直接回车表示跳过）" : "";
-  askForm.classList.add("open");
-  answerInput.value = "";
-  answerInput.focus();
-  // The session is stopped at this moment, so the page has to be where the eyes are.
-  askForm.scrollIntoView({ block: "nearest" });
-});
+/** Wire one lesson's stream. The page connects when the learner starts, not when it loads. */
+function connect(url) {
+  // One attempt at a time: a new connection describes a new attempt, so the counters that
+  // describe it start over with it.
+  landed = 0;
+  pendingToken = null;
+  const source = new EventSource(url);
 
-source.addEventListener("heard", (message) => {
-  const heard = JSON.parse(message.data);
-  // Cleared on the token, not on the submit: the session moves on either way, and a question
-  // that timed out would otherwise leave the page asking for an answer nobody is waiting for.
-  if (heard.token === pendingToken) {
-    pendingToken = null;
-    askForm.classList.remove("open");
-  }
-  said.textContent = heard.answer.trim() === "" ? "（跳过）" : "你答：" + heard.answer;
-});
+  source.addEventListener("meta", (message) => {
+    const meta = JSON.parse(message.data);
+    who.textContent = meta.expert;
+    status.textContent = meta.mode === "live" ? "实时 provider" : "夹具回放";
+    learnerMode = meta.learner === true;
+    sessionToken = meta.token ?? null;
+    // The question bar belongs to a board where somebody can take a question. A recording has
+    // no answer on file, so offering the input there would be offering nothing.
+    askqForm.classList.toggle("open", meta.questions === true);
+    if (learnerMode && meta.questions !== true) {
+      said.textContent = "（这是录制回放：可以答，不能问——提问要接上真模型，加 ?live=1。）";
+    }
+  });
+
+  source.addEventListener("surface", (message) => {
+    const payload = JSON.parse(message.data);
+    landed += 1;
+    clock.textContent = `已落第 ${landed} 步`;
+    draw(payload.surface);
+    drawNarration(payload.narration);
+  });
+
+  source.addEventListener("phase", (message) => {
+    const { phase } = JSON.parse(message.data);
+    const label = PHASE_LABELS[phase];
+    if (label !== undefined) said.textContent = "（" + label + "）";
+  });
+
+  source.addEventListener("question", (message) => {
+    const question = JSON.parse(message.data);
+    pendingToken = question.token;
+    askForm.querySelector(".prompt").textContent = "【问】" + question.prompt;
+    askForm.querySelector(".hint").textContent = question.skippable ? "（直接回车表示跳过）" : "";
+    askForm.classList.add("open");
+    answerInput.value = "";
+    answerInput.focus();
+    // The session is stopped at this moment, so the page has to be where the eyes are.
+    askForm.scrollIntoView({ block: "nearest" });
+  });
+
+  source.addEventListener("heard", (message) => {
+    const heard = JSON.parse(message.data);
+    // Cleared on the token, not on the submit: the session moves on either way, and a question
+    // that timed out would otherwise leave the page asking for an answer nobody is waiting for.
+    if (heard.token === pendingToken) {
+      pendingToken = null;
+      askForm.classList.remove("open");
+    }
+    said.textContent = heard.answer.trim() === "" ? "（跳过）" : "你答：" + heard.answer;
+  });
+
+  source.addEventListener("question-taken", (message) => {
+    const taken = JSON.parse(message.data);
+    said.textContent = "你问：" + taken.text;
+  });
+
+  source.addEventListener("question-dropped", () => {
+    said.textContent = "（课已经结束了，刚才的问题没来得及问。）";
+  });
+
+  source.addEventListener("draft", (message) => {
+    // Ended is ended: EventSource reconnects on its own after a stream closes, and a reconnect
+    // would run the whole build again — six claims made, six bills to pay, one lesson wanted.
+    source.close();
+    const made = JSON.parse(message.data);
+    status.textContent = "等审核";
+    const done = `这份教材做好了：《${made.name}》（${made.id}）。签了字才能上课：npm run review-domain -- ${made.id}（签完再点开始，就能匹配到它。）`;
+    said.textContent = done;
+    setupResult.className = "result good";
+    setupResult.hidden = false;
+    setupResult.textContent = done;
+    setupPanel.hidden = false;
+  });
+
+  source.addEventListener("pending", (message) => {
+    // Ended is ended: see the draft handler. A topic that already has a draft is not built a
+    // second time — the signature is the door, and a single match opens its review right here.
+    source.close();
+    const pending = JSON.parse(message.data);
+    const list = pending.drafts.map((draft) => `《${draft.name}》（${draft.id}）`).join("、");
+    const text =
+      pending.drafts.length === 1
+        ? `这个主题已经有一份草稿：${list}——下面就是它，过目后签字。`
+        : `这个主题匹配到不止一份草稿：${list}——在「待签字」里点一份，过目后再签。`;
+    status.textContent = "等审核";
+    said.textContent = text;
+    setupResult.className = "result good";
+    setupResult.hidden = false;
+    setupResult.textContent = text;
+    setupPanel.hidden = false;
+    if (pending.drafts.length === 1) void openReview(pending.drafts[0].id);
+  });
+
+  source.addEventListener("done", (message) => {
+    const result = JSON.parse(message.data);
+    source.close();
+
+    if (result.stoppedBefore === "semantic") {
+      // Stopped before teaching (ADR 0005): nothing was said because a claim could not be
+      // verified — and a stop that does not say WHICH claim is a dead end, not a lesson.
+      const lines = result.unsupported.map((verdict) => `${verdict.id}：${verdict.reason}`);
+      const text =
+        "这节课停在这里：有断言没通过独立校验，所以一个字都没讲。\n" +
+        lines.join("\n") +
+        "\n（可以再开始一次——清单每次现生成；要是总停在这一步，就是这门教材本身要改。）";
+      status.textContent = "停在这里：断言没通过校验";
+      said.textContent = text;
+      setupResult.className = "result bad";
+      setupResult.hidden = false;
+      setupResult.textContent = text;
+      setupPanel.hidden = false;
+      return;
+    }
+
+    const final = result.retaken ? "重考" : "首考";
+    status.textContent = `${result.passed ? "通过" : "未通过"}（${final} · ${result.checkId}）`;
+    if (result.saved === true) {
+      // The learner has to be TOLD the name of their own record, or coming back tomorrow is
+      // something only the experiment can do.
+      said.textContent = `这节课记下来了：${result.sessionId} — 明天回来跑 npm run enter -- --followup ${result.sessionId}`;
+    }
+  });
+
+  source.addEventListener("failed", (message) => {
+    // Ended is ended: see the draft handler. A reconnect here would rerun the whole session,
+    // or the whole build, without anyone asking for it.
+    source.close();
+    // The message can be several lines (a build that refused lists every problem), and the
+    // panel comes back with it: a failed attempt should be one edit away from a retry.
+    status.textContent = "出错";
+    said.textContent = "出错：" + message.data;
+    setupResult.className = "result bad";
+    setupResult.hidden = false;
+    setupResult.textContent = "上一次没有做成：\n" + message.data;
+    setupPanel.hidden = false;
+  });
+}
 
 askForm.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -374,29 +630,255 @@ askqForm.addEventListener("submit", (event) => {
   });
 });
 
-source.addEventListener("question-taken", (message) => {
-  const taken = JSON.parse(message.data);
-  said.textContent = "你问：" + taken.text;
+askqInput.addEventListener("keydown", (event) => {
+  // Enter sends, Shift+Enter makes a new line. `isComposing` keeps a Chinese IME's
+  // confirmation Enter from sending half a word.
+  if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+  event.preventDefault();
+  askqForm.requestSubmit();
 });
 
-source.addEventListener("question-dropped", () => {
-  said.textContent = "（课已经结束了，刚才的问题没来得及问。）";
-});
+// ---------------------------------------------------------------- the setup --
 
-source.addEventListener("done", (message) => {
-  const result = JSON.parse(message.data);
-  const final = result.retaken ? "重考" : "首考";
-  status.textContent = `${result.passed ? "通过" : "未通过"}（${final} · ${result.checkId}）`;
-  if (result.saved === true) {
-    // The learner has to be TOLD the name of their own record, or coming back tomorrow is
-    // something only the experiment can do.
-    said.textContent = `这节课记下来了：${result.sessionId} — 明天回来跑 npm run enter -- --followup ${result.sessionId}`;
+let offered = null;
+
+/** One option per offering, with the same one-line detail the terminal prints. */
+function fill(select, entries) {
+  for (const entry of entries) {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.label;
+    option.title = entry.detail;
+    select.append(option);
   }
-  source.close();
+}
+
+/** Build the entry panel from one `/options` snapshot. Re-runnable: a signature changes it. */
+function applyOptions(options) {
+  offered = options;
+
+  // The Catalogue stays visible under the input: its length is the honest statement of what can
+  // be taught, and clicking a name is the same as typing it.
+  catalogueLine.replaceChildren();
+  for (const domain of options.domains) {
+    const chip = document.createElement("a");
+    chip.href = "#";
+    chip.textContent = domain.label;
+    chip.title = domain.detail;
+    chip.addEventListener("click", (event) => {
+      event.preventDefault();
+      topicInput.value = domain.label;
+    });
+    catalogueLine.append(chip, document.createTextNode("　"));
+  }
+
+  // Drafts are visible, and still not selectable into a lesson: they have not been signed. What
+  // clicking one opens is the review — the material first, then the signature.
+  draftsLine.replaceChildren();
+  draftLine.hidden = options.drafts.length === 0;
+  for (const draft of options.drafts) {
+    const chip = document.createElement("a");
+    chip.href = "#";
+    chip.textContent = draft.name;
+    chip.title = `草稿 ${draft.id}——点击审核并签字`;
+    chip.addEventListener("click", (event) => {
+      event.preventDefault();
+      void openReview(draft.id);
+    });
+    draftsLine.append(chip, document.createTextNode("　"));
+  }
+
+  for (const select of [stylePick, leadPick, challengerPick]) select.replaceChildren();
+  fill(stylePick, options.styles);
+  for (const select of [leadPick, challengerPick]) fill(select, options.personas);
+
+  modelPick.replaceChildren();
+  if (options.live) {
+    modelRow.hidden = options.models.length === 0;
+    for (const model of options.models) {
+      const option = document.createElement("option");
+      option.value = model;
+      option.textContent = model;
+      modelPick.append(option);
+    }
+    if (options.defaultModel !== null) modelPick.value = options.defaultModel;
+    setupNote.textContent = `将用 ${options.provider} 上课：输入主题——已有的直接上课；没有的，现做一份（做完在页面上签字，才进目录）。`;
+  } else {
+    // The recording is one take — one Domain, one Style, one voice. Locked rather than hidden:
+    // the panel still says what the take contains, it just cannot pretend it could differ, and
+    // with no provider a new topic cannot be built either.
+    const recorded = options.domains.find((domain) => domain.id === options.recorded.domain);
+    topicInput.value = recorded === undefined ? "" : recorded.label;
+    stylePick.value = options.recorded.style;
+    leadPick.value = options.recorded.persona;
+    challengerPick.value = options.recorded.persona;
+    for (const select of [stylePick, leadPick, challengerPick]) select.disabled = true;
+    modelRow.hidden = true;
+    setupNote.textContent = "没有配置 provider：录播只有一节「时间戳、时区与夏令时」。输入它（或「时区」）可以直接上；别的主题做不了新教材。";
+  }
+}
+
+async function fetchOptions() {
+  try {
+    applyOptions(await (await fetch("/options")).json());
+  } catch (error) {
+    setupNote.textContent = "读不到可选项：" + error.message;
+  }
+}
+
+// ------------------------------------------------------------- review + sign --
+
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className !== undefined) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** One card in the review: where it came from, then the text itself. */
+function itemBlock(meta, body) {
+  const item = element("div", "item");
+  if (meta !== "") item.append(element("span", "meta", meta));
+  item.append(element("div", "quote", body));
+  return item;
+}
+
+let reviewId = null;
+let reviewLabel = "";
+
+/**
+ * Show the material a signature accepts, and take the name.
+ *
+ * The gate is only a gate if the person sees what they are vouching for (ADR 0010): the sources,
+ * the passages themselves, and what will be asked. That is what this renders before the button.
+ */
+async function openReview(id) {
+  try {
+    const response = await fetch(`/draft?id=${encodeURIComponent(id)}`);
+    if (!response.ok) throw new Error(await response.text());
+    const draft = await response.json();
+
+    reviewId = draft.id;
+    reviewLabel = draft.name;
+    reviewName.textContent = `《${draft.name}》`;
+    reviewBoundary.textContent = draft.boundary;
+    reviewSigner.value = "";
+    reviewProblems.hidden = true;
+    reviewBody.replaceChildren();
+
+    const sources = element("section");
+    sources.append(element("h3", undefined, `来源（${draft.sources.length}）`));
+    for (const source of draft.sources) {
+      sources.append(
+        itemBlock(
+          `[${source.index}] 抓取于 ${source.fetchedAt} · sha256 ${String(source.sha256).slice(0, 12)}…`,
+          source.url,
+        ),
+      );
+    }
+    reviewBody.append(sources);
+
+    const corpus = element("section");
+    corpus.append(element("h3", undefined, `语料段落（${draft.passages.length}）`));
+    for (const passage of draft.passages) {
+      corpus.append(itemBlock(`${passage.id} — ${passage.source}`, passage.text));
+    }
+    reviewBody.append(corpus);
+
+    const teaching = element("section");
+    teaching.append(element("h3", undefined, `误解（${draft.misconceptions.length}）与检查（${draft.checks.length}）`));
+    for (const entry of draft.misconceptions) {
+      teaching.append(itemBlock(`${entry.id} · 学生常错`, `${entry.name}：${entry.wrongModel}`));
+    }
+    for (const check of draft.checks) {
+      teaching.append(itemBlock(`${check.id} · 末尾检查`, `${check.prompt}\n（期望：${check.expected}）`));
+    }
+    reviewBody.append(teaching);
+
+    // Near-duplicate drafts: shown with their shared-source count, swept only if the box stays
+    // ticked. Deletion is a person's decision, made with the names in front of them.
+    sweepBox.checked = true;
+    sweepLine.hidden = draft.siblings.length === 0;
+    sweepList.textContent = draft.siblings
+      .map((sibling) => `《${sibling.name}》（${sibling.id}，共用 ${sibling.shared} 份来源）`)
+      .join("、");
+
+    if (draft.problems.length > 0) {
+      reviewProblems.hidden = false;
+      reviewProblems.textContent = "这份草稿没通过校验，不能签字：\n" + draft.problems.join("\n");
+    }
+
+    reviewPanel.hidden = false;
+    reviewPanel.scrollIntoView({ block: "nearest" });
+    reviewSigner.focus();
+  } catch (error) {
+    setupPanel.hidden = false;
+    setupResult.className = "result bad";
+    setupResult.hidden = false;
+    setupResult.textContent = `读不到这份草稿：${error.message}`;
+  }
+}
+
+document.getElementById("review-sign").addEventListener("click", () => {
+  if (reviewId === null) return;
+  const signer = reviewSigner.value.trim();
+  if (signer === "") {
+    reviewSigner.focus();
+    reviewProblems.hidden = false;
+    reviewProblems.textContent = "签字需要一个名字——这份材料要有具体的人负责（它会写进 owner）。";
+    return;
+  }
+
+  fetch("/sign", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: reviewId, name: signer, sweep: sweepBox.checked }),
+  })
+    .then(async (response) => {
+      if (!response.ok) throw new Error(await response.text());
+      const signed = await response.json();
+      reviewPanel.hidden = true;
+      reviewId = null;
+      const cleared =
+        signed.deleted.length === 0
+          ? ""
+          : `并删除了 ${signed.deleted.length} 份同主题草稿：${signed.deleted.join("、")}。`;
+      setupResult.className = "result good";
+      setupResult.hidden = false;
+      setupResult.textContent = `已签字：《${reviewLabel}》进目录了（${signed.id}）。${cleared}在「已有教材」里点它，或直接输入它的名字，就能上课。`;
+      await fetchOptions();
+    })
+    .catch((error) => {
+      reviewProblems.hidden = false;
+      reviewProblems.textContent = `没有签成：${error.message}`;
+    });
 });
 
-source.addEventListener("failed", (message) => {
-  status.textContent = "出错：" + message.data;
+document.getElementById("review-back").addEventListener("click", () => {
+  reviewPanel.hidden = true;
+  reviewId = null;
+});
+
+fetchOptions();
+
+document.getElementById("start").addEventListener("click", () => {
+  if (offered === null) return;
+  const topic = topicInput.value.trim();
+  if (topic === "") {
+    setupNote.textContent = "先写一个主题——已有的直接上课，没有的现做一份。";
+    topicInput.focus();
+    return;
+  }
+  const params = new URLSearchParams({ learner: "1", topic });
+  if (offered.live) {
+    params.set("live", "1");
+    params.set("style", stylePick.value);
+    params.set("persona", leadPick.value);
+    params.set("challenger", challengerPick.value);
+    if (modelPick.value !== "") params.set("model", modelPick.value);
+  }
+  setupPanel.hidden = true;
+  connect(`/board?${params.toString()}`);
 });
 </script>
 </body>

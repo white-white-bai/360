@@ -148,7 +148,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     const body = await response.text();
     if (!response.ok) {
       throw new Error(
-        `provider returned HTTP ${response.status} for actor ${req.actor}: ${body.slice(0, 500)}`,
+        `provider returned HTTP ${response.status} at ${this.endpoint} for actor ${req.actor}: ${body.slice(0, 500)}`,
       );
     }
 
@@ -232,7 +232,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     if (!response.ok) {
       const failure = await response.text();
       throw new Error(
-        `provider returned HTTP ${response.status} for actor ${req.actor}: ${failure.slice(0, 500)}`,
+        `provider returned HTTP ${response.status} at ${this.endpoint} for actor ${req.actor}: ${failure.slice(0, 500)}`,
       );
     }
     if (response.body === null) {

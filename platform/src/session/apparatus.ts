@@ -11,8 +11,9 @@ import type { LedgerRow } from "../providers/meter.ts";
 import { SpendMeter } from "../providers/meter.ts";
 import { runTurn } from "./stream.ts";
 import { applySteps } from "./turn.ts";
-import type { CompletionRequest, ModelProvider } from "../providers/types.ts";
-import { ModelReplyUnusable, ReplyBudget, retryNote } from "./retry.ts";
+import type { ModelProvider } from "../providers/types.ts";
+import { ModelReplyUnusable, ReplyBudget } from "./retry.ts";
+import { ask } from "./ask.ts";
 import type { Surface } from "../render/render.ts";
 import { render } from "../render/render.ts";
 import type { Probe, ProbeOutcome, SemanticVerdict } from "./contracts.ts";
@@ -268,6 +269,16 @@ export interface UnlistedConcern {
 
 export interface ApparatusInput {
   expert: Expert;
+  /**
+   * The Expert playing the Challenger position, when it is a different voice from the lead
+   * (ADR 0009).
+   *
+   * A Position is a part and an Expert is a voice. The two SHARE one Domain — the refutation
+   * has to come from the same corpus and the same misconception catalogue the lesson was
+   * taught from — and may differ in Persona. Defaults to the lead's expert, which is what
+   * every session before this decision had.
+   */
+  challenger?: Expert;
   check: UnderstandingCheck;
   /**
    * Answers to the probes, in the order the probes were authored.
@@ -305,6 +316,15 @@ export interface ApparatusInput {
    * learner ever does: the experiment's conditions stay free of this by never supplying one.
    */
   takeQuestion?: () => string | undefined;
+  /**
+   * Called as each phase STARTS, before its work (ADR 0009's live surface).
+   *
+   * The preparation is several model calls long — claims, independent verification, probe
+   * authoring — and nothing lands on the board during it. Without this report, a page with a
+   * real provider looks broken for exactly as long as those calls take. The sequence is the
+   * same one `phases` records.
+   */
+  onPhase?: (phase: string) => void;
   /**
    * The learner's answer if they are asked again after a retry.
    *
@@ -398,7 +418,7 @@ export interface ApparatusResult {
   saved: boolean;
   /** Which stage stopped the session, when it stopped before teaching. */
   stoppedBefore: "semantic" | null;
-  /** What ran, in order. The ablation experiment diffs these. */
+  /** Each phase as it began, in order. The ablation experiment diffs these; a live page reads them. */
   phases: string[];
   /** What was switched off, so a result can never be read without its condition. */
   disabled: ApparatusFeature[];
@@ -428,6 +448,7 @@ export async function runApparatusSession(
 ): Promise<ApparatusResult> {
   const meter = new SpendMeter(provider);
   const { expert, check } = input;
+  const challengerExpert = input.challenger ?? expert;
   const disabled = [...(input.disable ?? [])];
   const off = (feature: ApparatusFeature): boolean => disabled.includes(feature);
   const phases: string[] = [];
@@ -438,11 +459,18 @@ export async function runApparatusSession(
 
   const sessionId = input.sessionId ?? `apparatus-${expert.domain.id}`;
 
+  /** Record a phase and say it out loud, at the moment its work starts. */
+  const note = (name: string): void => {
+    phases.push(name);
+    input.onPhase?.(name);
+  };
+
   // 1 — the claims. Supplied rather than generated during the experiment, so that
   // both conditions teach the same content.
   let list = input.list;
   const listInjected = list !== undefined;
   if (list === undefined) {
+    note("assertion-list");
     list = await ask(
       meter,
       {
@@ -454,12 +482,11 @@ export async function runApparatusSession(
       (text) => parseAssertionList(text, expert.domain.id),
       budget,
     );
-    phases.push("assertion-list");
   }
 
   // 2 — the kernel's structural check. Always on: it can only abort, never teach.
+  note("structural-verify");
   const structural = verifyAssertionList(list, expert.domain.corpus);
-  phases.push("structural-verify");
   if (!structural.ok) {
     const detail = structural.verdicts
       .filter((verdict) => !verdict.ok)
@@ -471,6 +498,7 @@ export async function runApparatusSession(
   // 3 — the independent semantic check.
   let semantic: SemanticVerdict[] = [];
   if (!off("semanticVerify")) {
+    note("semantic-verify");
     semantic = await ask(
       meter,
       {
@@ -482,14 +510,13 @@ export async function runApparatusSession(
       parseSemanticVerdicts,
       budget,
     );
-    phases.push("semantic-verify");
 
     const unsupported = semantic.filter((verdict) => !verdict.ok);
     if (unsupported.length > 0) {
       // ADR 0005: an unverified claim is not delivered. Note this STOPS the session
       // rather than warning — "teach it but mention it might be wrong" leaves the
       // learner unable to tell which parts to trust.
-      phases.push("stopped-before-teaching");
+      note("stopped-before-teaching");
       return {
         list,
         listInjected,
@@ -516,6 +543,7 @@ export async function runApparatusSession(
   // 4 — probes, authored by someone who is not the explainer.
   let probes: Probe[] = [];
   if (!off("probes")) {
+    note("probe-author");
     probes = await ask(
       meter,
       {
@@ -527,7 +555,6 @@ export async function runApparatusSession(
       parseProbes,
       budget,
     );
-    phases.push("probe-author");
   }
 
   // 5 — the narration, with the probes placed inside it.
@@ -657,6 +684,7 @@ export async function runApparatusSession(
     return answerQuestion(current, trimmed);
   };
 
+  note("narration");
   const narration = await runTurn(
     meter,
     {
@@ -669,18 +697,18 @@ export async function runApparatusSession(
     "lead-explainer",
     { prepare: (step) => speakOne(step, probes), onStep: place, retry: budget, interlude: interjection },
   );
-  phases.push("narration");
   let log = narration.log;
 
   // 6 — the terminal check. The same hand-authored asset in every condition.
+  note("terminal-check");
   const terminalAnswer =
     input.askTerminal === undefined ? input.terminalAnswer : await input.askTerminal(check);
   const verdict = gradeObjectively(check, terminalAnswer);
-  phases.push("terminal-check");
 
   // 7 — probe outcomes.
   const outcomes: ProbeOutcome[] = [];
   if (!off("probes")) {
+    note("probe-evaluation");
     for (const [index, probe] of probes.entries()) {
       // Already put, at the point in the lesson where the question belongs. Only a probe the
       // narration never placed is asked here — and it is still asked, because a model that
@@ -714,7 +742,6 @@ export async function runApparatusSession(
       // guarantee.
       log = appendAnswer(log, { at: nextAt(log), probeId: probe.id, text: answer });
     }
-    phases.push("probe-evaluation");
   }
 
   // A concern with no matching entry is the catalogue saying it is short. The index
@@ -740,22 +767,23 @@ export async function runApparatusSession(
       verdict.diagnosis?.misconceptionId ??
       null;
 
+    note("challenger");
     const challenge = await runTurn(
       meter,
       {
         actor: ACTOR.challenger,
         model: MODEL,
-        system: challengePrompt(expert, list),
+        system: challengePrompt(challengerExpert, list),
         input: JSON.stringify({ triggers, targetMisconception: target }),
       },
       log,
       "challenger",
       { onStep: input.onStep, retry: budget, interlude: interjection },
     );
-    phases.push("challenger");
     log = challenge.log;
 
     // 9 — a retry realises the same claims with different words.
+    note("re-teach");
     const retry = await runTurn(
       meter,
       {
@@ -768,7 +796,6 @@ export async function runApparatusSession(
       "lead-explainer",
       { onStep: input.onStep, retry: budget, interlude: interjection },
     );
-    phases.push("re-teach");
     log = retry.log;
   }
 
@@ -802,8 +829,8 @@ export async function runApparatusSession(
     // A learner who stops is not carried by the retake, and a question nobody was asked
     // must not be graded.
     if (retryAnswer !== undefined) {
+      note("retake");
       verdictAfterRetry = gradeObjectively(retakeAsset, retryAnswer);
-      phases.push("retake");
     }
   }
 
@@ -835,42 +862,6 @@ export async function runApparatusSession(
     phases,
     disabled,
   };
-}
-
-/**
- * One actor call, with a single retry when the reply cannot be used.
- *
- * ADR 0001's owner decided the policy after three live runs each died on a different model
- * slip: retry once, count every retry, and let the harness report a trial that still fails
- * as incomplete rather than as a pass or a failure.
- *
- * Only a reply that could not be INTERPRETED is retried. A transport failure has its own
- * error and its own causes, and hiding an outage behind a second attempt would turn "the
- * provider was down" into "the model was sloppy" — which is the wrong lesson to learn from
- * a failed run.
- */
-async function ask<T>(
-  meter: SpendMeter,
-  request: CompletionRequest,
-  parse: (text: string) => T,
-  budget: ReplyBudget,
-): Promise<T> {
-  const first = await meter.complete(request);
-  try {
-    return parse(first.text);
-  } catch (firstError) {
-    const reason = firstError instanceof Error ? firstError.message : String(firstError);
-    budget.spend();
-    const second = await meter.complete({ ...request, input: request.input + retryNote(reason) });
-    try {
-      return parse(second.text);
-    } catch (secondError) {
-      const again = secondError instanceof Error ? secondError.message : String(secondError);
-      throw new ModelReplyUnusable(
-        `\`${request.actor}\` returned an unusable reply twice.\nFirst: ${reason}\nSecond: ${again}`,
-      );
-    }
-  }
 }
 
 /** The same substitution, for one step at a time — the shape a streamed turn needs. */

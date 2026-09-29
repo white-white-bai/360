@@ -117,7 +117,9 @@ export class AnthropicProvider implements ModelProvider {
 
     const raw = await response.text();
     if (!response.ok) {
-      throw new Error(`provider returned HTTP ${response.status} for actor ${req.actor}: ${raw.slice(0, 500)}`);
+      throw new Error(
+        `provider returned HTTP ${response.status} at ${this.endpoint} for actor ${req.actor}: ${raw.slice(0, 500)}`,
+      );
     }
 
     let parsed: RawMessage;
@@ -171,7 +173,7 @@ export class AnthropicProvider implements ModelProvider {
     if (!response.ok) {
       const failure = await response.text();
       throw new Error(
-        `provider returned HTTP ${response.status} for actor ${req.actor}: ${failure.slice(0, 500)}`,
+        `provider returned HTTP ${response.status} at ${this.endpoint} for actor ${req.actor}: ${failure.slice(0, 500)}`,
       );
     }
     if (response.body === null) {

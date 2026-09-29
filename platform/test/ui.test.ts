@@ -1,15 +1,40 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 
 import { findCheck } from "../src/checks/load.ts";
+import {
+  BUILD_PEDAGOGY,
+  BUILD_PLAN,
+  BUILD_PLAN_TWIN,
+  BUILD_SELECTION,
+  builderScript,
+  documentedFetcher,
+} from "../src/build/fixtures-build.ts";
 import type { SessionLog } from "../src/events/log.ts";
 import { composeExpert, loadLibrary } from "../src/experts/load.ts";
 import { ScriptedProvider } from "../src/providers/scripted.ts";
 import type { ModelProvider } from "../src/providers/types.ts";
-import { answeredQuestionScript } from "../src/session/fixtures-apparatus.ts";
+import { answeredQuestionScript, cleanScript, misconceptionScript } from "../src/session/fixtures-apparatus.ts";
+import { APPARATUS_VERDICTS_UNSUPPORTED } from "../src/session/fixtures-apparatus.ts";
 import type { SessionStore } from "../src/session/store.ts";
 import { createBoardServer } from "../src/ui/serve.ts";
+
+/** The shape `/options` promises the page (ADR 0009). */
+interface BoardOptionsPayload {
+  live: boolean;
+  provider: string | null;
+  domains: Array<{ id: string; label: string; detail: string }>;
+  styles: Array<{ id: string; label: string; detail: string }>;
+  personas: Array<{ id: string; label: string; detail: string }>;
+  models: string[];
+  defaultModel: string | null;
+  drafts: Array<{ id: string; name: string }>;
+  recorded: { persona: string; style: string; domain: string };
+}
 
 /**
  * A cursor over a board's SSE stream, so "read to the next thing" means the next one after what
@@ -81,13 +106,18 @@ async function withBoard(
   run: (base: string) => Promise<void>,
   provider?: ModelProvider,
   store?: SessionStore,
+  models?: string[],
 ): Promise<void> {
   // Zero delay: the pacing is a fixture imitating a network, and a test should not
-  // spend nine seconds pretending.
+  // spend nine seconds pretending. The drafts shelf is a fresh temporary one, so a test can
+  // never depend on — or disturb — whatever is actually waiting for review in the repo.
+  const draftsRoot = mkdtempSync(join(tmpdir(), "atp-board-drafts-"));
   const server = createBoardServer({
     chunkDelayMs: 0,
+    draftsDir: join(draftsRoot, "domains-draft"),
     ...(provider === undefined ? {} : { provider }),
     ...(store === undefined ? {} : { store }),
+    ...(models === undefined ? {} : { models }),
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
@@ -101,6 +131,7 @@ async function withBoard(
     await new Promise<void>((resolve, reject) =>
       server.close((error) => (error === undefined ? resolve() : reject(error))),
     );
+    rmSync(draftsRoot, { recursive: true, force: true });
   }
 }
 
@@ -149,6 +180,40 @@ test("the streamed session shows the whole loop, ending on the retake", async ()
     assert.equal(done.retaken, true);
     assert.equal(done.checkId, "C-overlap");
   });
+});
+
+test("the page hears what the session is doing before anyone speaks", async () => {
+  // Prep is several model calls with nothing on the board. If those were silent, a page with a
+  // slow provider would look broken exactly while it works.
+  await withBoard(async (base) => {
+    const body = await (await fetch(`${base}/board`)).text();
+    const phases = [...body.matchAll(/event: phase\ndata: \{"phase":"([^"]+)"\}/g)].map((match) => match[1]);
+
+    assert.deepEqual(
+      phases.slice(0, 4),
+      ["assertion-list", "structural-verify", "semantic-verify", "probe-author"],
+      "the silent preparation is reported, in order",
+    );
+    assert.ok(phases.includes("narration"));
+    assert.ok(body.indexOf("event: phase") < body.indexOf("event: surface"), "phases arrive before the board fills");
+  });
+});
+
+test("a session that stops before teaching names the claim that stopped it", async () => {
+  // ADR 0005: an unverified claim is not delivered, and the session stops. A stop that does not
+  // say WHICH claim failed leaves the learner with "未通过" and nothing to act on.
+  await withBoard(
+    async (base) => {
+      const body = await (await fetch(`${base}/board`)).text();
+
+      assert.match(body, /"stoppedBefore":"semantic"/);
+      assert.match(body, /"passed":false/);
+      assert.match(body, /"id":"A3"/, "the failing claim is named");
+      assert.match(body, /the grammar shows an offset is carried/, "with the verifier's reason");
+      assert.ok(!body.includes("event: surface"), "and nothing was taught on an unverified list");
+    },
+    new ScriptedProvider({ ...cleanScript(), "grounding-verifier": APPARATUS_VERDICTS_UNSUPPORTED }),
+  );
 });
 
 test("an answer for a token nobody is waiting on is refused", async () => {
@@ -254,6 +319,430 @@ test("a question with no lesson taking it is refused, like an answer into nowher
       body: JSON.stringify({ token: "no-such-token", text: "为什么？" }),
     });
     assert.equal(response.status, 409);
+  });
+});
+
+// ------------------------------------------- the entry panel (ADR 0009) --
+
+test("the page carries the entry panel: what, how, who teaches, who challenges, which model", async () => {
+  await withBoard(async (base) => {
+    const html = await (await fetch(`${base}/`)).text();
+    const ids = [
+      "setup",
+      "pick-topic",
+      "catalogue",
+      "draft-line",
+      "drafts",
+      "pick-style",
+      "pick-lead",
+      "pick-challenger",
+      "pick-model",
+      "setup-result",
+      "start",
+      "askq",
+      "review",
+      "review-name",
+      "review-boundary",
+      "review-body",
+      "review-problems",
+      "review-signer",
+      "review-sign",
+      "review-back",
+      "sweep-line",
+      "sweep-list",
+      "review-sweep",
+    ];
+    for (const id of ids) {
+      assert.match(html, new RegExp(`id="${id}"`), `${id} must be on the page`);
+    }
+    // The topic is typed rather than picked, and the Catalogue stays visible underneath it —
+    // its length is the honest statement of what can be taught.
+    assert.match(html, /id="pick-topic"/, "the topic is an input");
+    assert.doesNotMatch(html, /<select id="pick-topic"/, "and not a dropdown wearing its id");
+    assert.match(html, /id="catalogue"/, "with the catalogue beside it");
+    assert.match(html, /addEventListener\("phase"/, "the page listens for what the session is doing");
+    assert.match(html, /addEventListener\("draft"/, "and for a build that finished");
+    assert.match(html, /addEventListener\("pending"/, "and for a draft waiting for its signature");
+    assert.match(html, /\/draft\?id=/, "the review is fetched from the board, not hand-rolled in the page");
+    assert.match(html, /\/sign"/, "and the signature posts to the same gate the CLI uses");
+    assert.match(html, /stoppedBefore/, "a stop before teaching is rendered as its own outcome");
+    // A stream that ends is not reopened: EventSource reconnects by itself, and a reconnect
+    // would rerun the session — or the build — from the top. Every terminal event closes it.
+    assert.match(html, /addEventListener\("failed"[\s\S]{0,600}?source\.close\(\)/, "failed closes the stream");
+    assert.match(html, /addEventListener\("draft"[\s\S]{0,600}?source\.close\(\)/, "so does the draft");
+    assert.match(html, /addEventListener\("pending"[\s\S]{0,600}?source\.close\(\)/, "and so does pending");
+  });
+});
+
+test("a typed topic that names a Domain teaches it, with no build involved", async () => {
+  await withBoard(async (base) => {
+    const body = await (await fetch(`${base}/board?topic=${encodeURIComponent("时区")}`)).text();
+    assert.ok(!body.includes("event: failed"), `a matching topic must teach: ${body.slice(0, 300)}`);
+    assert.match(body, /event: done/);
+    assert.match(body, /时区是一套规则/, "and the lesson is the Domain the topic matched");
+  });
+});
+
+test("a topic nothing matches, with no provider, says exactly what it needs", async () => {
+  await withBoard(async (base) => {
+    const body = await (await fetch(`${base}/board?topic=${encodeURIComponent("量子力学")}`)).text();
+    assert.match(body, /event: failed/);
+    assert.match(body, /需要一个模型 provider/, "the refusal names what is missing rather than pretending");
+  });
+});
+
+test("a topic nothing matches is built, and the page is handed the review step", async () => {
+  const root = mkdtempSync(join(tmpdir(), "atp-board-build-"));
+  const server = createBoardServer({
+    chunkDelayMs: 0,
+    provider: new ScriptedProvider(builderScript()),
+    fetcher: documentedFetcher(),
+    draftsDir: join(root, "domains-draft"),
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    const body = await (
+      await fetch(`http://127.0.0.1:${port}/board?live=1&topic=${encodeURIComponent("记号长度")}`)
+    ).text();
+
+    assert.match(body, /event: meta/);
+    assert.match(body, /新教材构建/, "a build says what it is, before it is anything else");
+    assert.match(body, /"phase":"plan"/, "the build reports its stages on the phase channel");
+    assert.match(body, /"phase":"prove"/, "including the kernel's own proof step");
+    assert.match(body, /event: draft/);
+    assert.match(body, /"id":"token-length"/, "the page is told what was made");
+    assert.ok(!body.includes("event: done"), "no lesson ran — a draft is not a lesson");
+    assert.ok(
+      existsSync(join(root, "domains-draft", "token-length", "corpus.md")),
+      "and the draft is on disk, one signature away",
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a waiting draft is listed, and its topic is answered with the signature — not a second build", async () => {
+  const root = mkdtempSync(join(tmpdir(), "atp-board-drafts-"));
+  const draftsDir = join(root, "domains-draft");
+  mkdirSync(join(draftsDir, "token-length"), { recursive: true });
+  writeFileSync(
+    join(draftsDir, "token-length", "meta.md"),
+    [
+      "---",
+      "id: token-length",
+      "name: 记号与长度",
+      "owner: TODO",
+      "corpusReviewedBy: TODO",
+      "corpusReviewedOn: TODO",
+      "deliveryLanguage: zh",
+      "sources:",
+      "  - https://spec.example/alpha",
+      "---",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  // No provider at all: if the pending path were missed, the board would say so instead of
+  // building — and the assertions below would catch a phase event that should not exist.
+  const server = createBoardServer({ chunkDelayMs: 0, draftsDir });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    const offered = (await (await fetch(`http://127.0.0.1:${port}/options`)).json()) as BoardOptionsPayload;
+    assert.deepEqual(offered.drafts, [{ id: "token-length", name: "记号与长度" }], "the shelf is visible to the page");
+
+    const body = await (
+      await fetch(`http://127.0.0.1:${port}/board?topic=${encodeURIComponent("记号与长度")}`)
+    ).text();
+    assert.match(body, /event: pending/);
+    assert.match(body, /"id":"token-length"/);
+    assert.ok(!body.includes("event: phase"), "a topic that already has a draft is not built again");
+    assert.ok(!body.includes("event: failed"));
+    assert.ok(!body.includes("event: done"), "and it does not teach — the signature is the door");
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a draft can be signed on the page: the material is served, and the signature moves it in", async () => {
+  const root = mkdtempSync(join(tmpdir(), "atp-board-sign-"));
+  mkdirSync(join(root, "domains"), { recursive: true });
+  const base = `http://127.0.0.1:`;
+  const server = createBoardServer({
+    chunkDelayMs: 0,
+    provider: new ScriptedProvider(builderScript()),
+    fetcher: documentedFetcher(),
+    draftsDir: join(root, "domains-draft"),
+    domainsDir: join(root, "domains"),
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+
+  try {
+    // A real draft first, through the same door the page uses.
+    const built = await (
+      await fetch(`${base}${port}/board?live=1&topic=${encodeURIComponent("记号长度")}`)
+    ).text();
+    assert.match(built, /event: draft/);
+
+    // What the reviewer is shown before any name is asked for.
+    const review = (await (
+      await fetch(`${base}${port}/draft?id=token-length`)
+    ).json()) as {
+      name: string;
+      sources: unknown[];
+      passages: Array<{ id: string }>;
+      problems: string[];
+    };
+    assert.equal(review.name, "记号与长度");
+    assert.equal(review.sources.length, 2, "the sources a signature accepts");
+    assert.deepEqual(
+      review.passages.map((passage) => passage.id),
+      ["P-token-def", "P-whitespace"],
+      "and the passages themselves",
+    );
+    assert.deepEqual(review.problems, [], "a clean draft has nothing to refuse it");
+
+    // No name, no signature.
+    const blank = await fetch(`${base}${port}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "token-length", name: "  " }),
+    });
+    assert.equal(blank.status, 400);
+
+    const signed = await fetch(`${base}${port}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "token-length", name: "白杨" }),
+    });
+    assert.equal(signed.status, 200);
+
+    // The board agrees with the filesystem, without a restart: shelf empty, catalogue grown.
+    const offered = (await (await fetch(`${base}${port}/options`)).json()) as BoardOptionsPayload;
+    assert.deepEqual(offered.drafts, [], "the shelf no longer holds it");
+    assert.ok(
+      offered.domains.some((domain) => domain.id === "token-length"),
+      "and the catalogue does — the library is read per request",
+    );
+    assert.ok(existsSync(join(root, "domains", "token-length", "meta.md")));
+
+    // Signing again is refused, not repeated.
+    const again = await fetch(`${base}${port}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "token-length", name: "白杨" }),
+    });
+    assert.equal(again.status, 409);
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** Two builds of the same plan: the first plan, then its twin (same sources, new id). */
+function twinScript(): Record<string, string | string[]> {
+  return {
+    "domain-planner": [BUILD_PLAN, BUILD_PLAN_TWIN],
+    "passage-selector": [BUILD_SELECTION, BUILD_SELECTION],
+    "pedagogy-author": [BUILD_PEDAGOGY, BUILD_PEDAGOGY],
+  };
+}
+
+test("signing can sweep the drafts it makes redundant — shown first, deleted only on request", async () => {
+  const root = mkdtempSync(join(tmpdir(), "atp-board-sweep-"));
+  mkdirSync(join(root, "domains"), { recursive: true });
+  const draftsDir = join(root, "domains-draft");
+  const server = createBoardServer({
+    chunkDelayMs: 0,
+    provider: new ScriptedProvider(twinScript()),
+    fetcher: documentedFetcher(),
+    draftsDir,
+    domainsDir: join(root, "domains"),
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    // Two drafts on the shelf: the plan, and the same plan re-planned under a new id.
+    const one = await (await fetch(`${base}/board?live=1&topic=${encodeURIComponent("记号长度")}`)).text();
+    assert.match(one, /event: draft/);
+    const two = await (await fetch(`${base}/board?live=1&topic=${encodeURIComponent("第二份对照草稿")}`)).text();
+    assert.match(two, /event: draft/);
+
+    // What the review offers to clean, with the reason it thinks so.
+    const review = (await (await fetch(`${base}/draft?id=token-length`)).json()) as {
+      siblings: Array<{ id: string; name: string; shared: number }>;
+    };
+    assert.deepEqual(review.siblings, [{ id: "token-length-twin", name: "记号与长度（重试）", shared: 2 }]);
+
+    const signed = await fetch(`${base}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "token-length", name: "白杨", sweep: true }),
+    });
+    assert.equal(signed.status, 200);
+    const result = (await signed.json()) as { deleted: string[] };
+    assert.deepEqual(result.deleted, ["token-length-twin"], "the duplicate was deleted");
+
+    assert.ok(!existsSync(join(draftsDir, "token-length-twin")), "and it is gone from the shelf");
+    assert.ok(
+      !existsSync(join(root, "domains", "token-length-twin")),
+      "deleted, not signed in its place",
+    );
+    assert.ok(existsSync(join(root, "domains", "token-length", "meta.md")));
+
+    const offered = (await (await fetch(`${base}/options`)).json()) as BoardOptionsPayload;
+    assert.deepEqual(offered.drafts, [], "one signature emptied the duplicate shelf");
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("without the sweep ticked, the duplicate is left alone", async () => {
+  const root = mkdtempSync(join(tmpdir(), "atp-board-sweep-off-"));
+  mkdirSync(join(root, "domains"), { recursive: true });
+  const draftsDir = join(root, "domains-draft");
+  const server = createBoardServer({
+    chunkDelayMs: 0,
+    provider: new ScriptedProvider(twinScript()),
+    fetcher: documentedFetcher(),
+    draftsDir,
+    domainsDir: join(root, "domains"),
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+  const base = `http://127.0.0.1:${port}`;
+
+  try {
+    await (await fetch(`${base}/board?live=1&topic=${encodeURIComponent("记号长度")}`)).text();
+    await (await fetch(`${base}/board?live=1&topic=${encodeURIComponent("第二份对照草稿")}`)).text();
+
+    const signed = await fetch(`${base}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "token-length", name: "白杨", sweep: false }),
+    });
+    assert.equal(signed.status, 200);
+    const result = (await signed.json()) as { deleted: string[] };
+    assert.deepEqual(result.deleted, [], "nothing was deleted without being asked");
+    assert.ok(existsSync(join(draftsDir, "token-length-twin")), "the duplicate is exactly where it was");
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the options are a snapshot: the library's offerings, and models only when a provider exists", async () => {
+  await withBoard(async (base) => {
+    const offered = (await (await fetch(`${base}/options`)).json()) as BoardOptionsPayload;
+    assert.equal(offered.live, false, "no provider is configured");
+    assert.equal(offered.provider, null);
+    assert.deepEqual(offered.models, [], "a recording runs on no model");
+    assert.equal(offered.defaultModel, null);
+    assert.ok(offered.domains.some((domain) => domain.id === "time-zones"));
+    assert.ok(offered.domains.some((domain) => domain.id === "utf8-and-length"));
+    assert.ok(offered.styles.some((style) => style.id === "analogy-heavy"));
+    assert.ok(offered.styles.some((style) => style.id === "plain-direct"));
+    assert.ok(offered.personas.some((persona) => persona.id === "patient-explainer"));
+    assert.ok(offered.personas.some((persona) => persona.id === "terse-engineer"));
+    assert.equal(offered.recorded.persona, "patient-explainer", "the page is told what the recording locked");
+    assert.equal(offered.recorded.domain, "time-zones");
+    assert.equal(offered.recorded.style, "analogy-heavy");
+    assert.deepEqual(offered.drafts, [], "a fresh shelf has nothing waiting for a signature");
+  });
+});
+
+test("with a provider, the options offer models and a default", async () => {
+  await withBoard(
+    async (base) => {
+      const offered = (await (await fetch(`${base}/options`)).json()) as BoardOptionsPayload;
+      assert.equal(offered.live, true);
+      assert.deepEqual(offered.models, ["m-one", "m-two"]);
+      assert.equal(offered.defaultModel, "m-one");
+    },
+    new ScriptedProvider(misconceptionScript()),
+    undefined,
+    ["m-one", "m-two"],
+  );
+});
+
+test("a session runs with what the page chose: domain, style, voices, model", async () => {
+  // Replay rather than learner mode, so the recorded answers carry the session to its end
+  // without a page to type at — the choices are what is under test here, not the asking. The
+  // recorded answers and scripted content are time-zones', so the Domain stays at the take's.
+  await withBoard(
+    async (base) => {
+      const body = await (
+        await fetch(
+          `${base}/board?live=1&style=plain-direct&persona=terse-engineer&challenger=patient-explainer&model=m-two`,
+        )
+      ).text();
+      assert.ok(!body.includes("event: failed"), `the chosen configuration must run, got:\n${body.slice(0, 300)}`);
+      assert.match(body, /event: done/, "and reach its own verdict");
+      assert.match(body, /惜字如金的工程师/, "the header names the chosen voice");
+      assert.match(body, /质疑者：耐心的讲解者/, "and the chosen challenger");
+    },
+    new ScriptedProvider(misconceptionScript()),
+    undefined,
+    ["m-one", "m-two"],
+  );
+});
+
+test("a chosen Domain is the corpus the session is checked against", async () => {
+  // The recorded claims cite time-zones passages, so against the other Domain's corpus the
+  // structural check must refuse them — which is only possible if the Domain choice reached the
+  // composition. The failure naming structural verification IS the evidence.
+  await withBoard(
+    async (base) => {
+      const body = await (await fetch(`${base}/board?live=1&domain=utf8-and-length`)).text();
+      assert.match(body, /event: failed/);
+      assert.match(body, /structural verification/);
+    },
+    new ScriptedProvider(misconceptionScript()),
+  );
+});
+
+test("an unoffered choice is refused at the door, not defaulted", async () => {
+  await withBoard(async (base) => {
+    const unknownPersona = await (await fetch(`${base}/board?persona=not-a-persona`)).text();
+    assert.match(unknownPersona, /event: failed/);
+    assert.match(unknownPersona, /not an offered persona/);
+
+    const unknownDomain = await (await fetch(`${base}/board?domain=not-a-domain`)).text();
+    assert.match(unknownDomain, /not an offered domain/);
+
+    const unknownStyle = await (await fetch(`${base}/board?style=not-a-style`)).text();
+    assert.match(unknownStyle, /not an offered style/);
+
+    const unknownModel = await (await fetch(`${base}/board?live=1&model=nope`)).text();
+    assert.match(unknownModel, /not one of the offered models/);
+  });
+});
+
+test("the recording refuses what it did not record", async () => {
+  // The same honesty the question bar applies to a board with no answer on file: the demo is
+  // one take — one Domain, one Style, one voice — and pretending otherwise would break the
+  // very thing it exists to show.
+  await withBoard(async (base) => {
+    for (const query of ["persona=terse-engineer", "style=plain-direct", "domain=utf8-and-length"]) {
+      const body = await (await fetch(`${base}/board?learner=1&${query}`)).text();
+      assert.match(body, /event: failed/, `${query} must be refused`);
+      assert.match(body, /one take/, `${query}: the refusal names the take`);
+    }
   });
 });
 
