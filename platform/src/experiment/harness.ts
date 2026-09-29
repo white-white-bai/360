@@ -37,8 +37,15 @@ export const CONDITION_ABLATIONS: Record<Condition, readonly ApparatusFeature[]>
 export interface TrialInput {
   expert: Expert;
   check: UnderstandingCheck;
-  /** The shared stimulus, generated once and taught by both conditions. */
-  list: AssertionList;
+  /**
+   * The shared stimulus, taught by both conditions.
+   *
+   * Omit it only for the FIRST trial of a live run, whose job is to generate one;
+   * capture it from `TrialResult.list` and inject it into every trial after that.
+   * Both conditions teaching the same claims is what makes the comparison mean
+   * anything.
+   */
+  list?: AssertionList;
   probeAnswers: readonly string[];
   terminalAnswer: string;
   /**
@@ -64,11 +71,14 @@ export interface TrialResult {
   condition: Condition;
   disabled: readonly ApparatusFeature[];
   /**
-   * True when the claims were injected rather than generated. It should always be
-   * true in an experiment: two conditions that generated their own lists could
-   * differ for a reason that has nothing to do with the apparatus.
+   * True when the claims were injected rather than generated. It is false only on a
+   * live run's first trial, whose job is to produce the stimulus every later trial
+   * is given: two conditions that generated their own lists could differ for a
+   * reason that has nothing to do with the apparatus.
    */
   listInjected: boolean;
+  /** The claims that were taught — the injected stimulus, or a generated one. */
+  list: AssertionList;
   passed: boolean;
   /** True when a failed check was retaken, so the result can be read in context. */
   retaken: boolean;
@@ -106,6 +116,7 @@ export async function runTrial(
     condition,
     disabled: result.disabled,
     listInjected: result.listInjected,
+    list: result.list,
     passed,
     retaken: result.verdictAfterRetry !== null,
     diagnosis: final?.diagnosis?.misconceptionId ?? null,

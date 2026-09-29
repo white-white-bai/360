@@ -12,6 +12,7 @@
     "baseline": "node src/session/run-baseline.ts",
     "apparatus": "node src/session/run-apparatus.ts",
     "validate": "node src/validate/run-validate.ts",
+    "experiment": "node src/experiment/run-experiment.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test"
   },
