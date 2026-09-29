@@ -1,5 +1,6 @@
-import type { Completion, CompletionRequest, ModelProvider } from "./types.ts";
+import type { Completion, CompletionRequest, ModelProvider, StreamEvent, Usage } from "./types.ts";
 import { costOf } from "./pricing.ts";
+import { estimateTokens } from "../util/tokens.ts";
 
 export interface LedgerRow {
   actor: string;
@@ -30,15 +31,62 @@ export class SpendMeter implements ModelProvider {
     this.#rows = new Map();
   }
 
+  /** The one place a call turns into money, whatever shape the call arrived in. */
+  #record(req: CompletionRequest, usage: Usage): void {
+    const row = this.#rows.get(req.actor) ?? emptyRow(req.actor);
+    row.calls += usage.calls;
+    row.inputTokens += usage.inputTokens;
+    row.outputTokens += usage.outputTokens;
+    row.costUsd += costOf(req.model, usage.inputTokens, usage.outputTokens);
+    this.#rows.set(req.actor, row);
+  }
+
   async complete(req: CompletionRequest): Promise<Completion> {
     const completion = await this.#inner.complete(req);
-    const row = this.#rows.get(req.actor) ?? emptyRow(req.actor);
-    row.calls += completion.usage.calls;
-    row.inputTokens += completion.usage.inputTokens;
-    row.outputTokens += completion.usage.outputTokens;
-    row.costUsd += costOf(req.model, completion.usage.inputTokens, completion.usage.outputTokens);
-    this.#rows.set(req.actor, row);
+    this.#record(req, completion.usage);
     return completion;
+  }
+
+  /**
+   * A streamed call is metered by the same rule as a buffered one.
+   *
+   * When the provider cannot stream, the buffered call is what happens — and it is
+   * recorded once, here, rather than by delegating to `complete` and counting it
+   * twice. Both paths exist so that switching a provider from buffered to streaming
+   * cannot change the cost report, which would make the acceptance experiment
+   * incomparable between conditions that used different providers.
+   */
+  async *stream(req: CompletionRequest): AsyncIterable<StreamEvent> {
+    const inner = this.#inner;
+    if (inner.stream === undefined) {
+      const completion = await inner.complete(req);
+      this.#record(req, completion.usage);
+      yield { kind: "delta", text: completion.text };
+      yield { kind: "usage", usage: completion.usage };
+      return;
+    }
+
+    let text = "";
+    let usage: Usage | null = null;
+    for await (const event of inner.stream(req)) {
+      if (event.kind === "delta") {
+        text += event.text;
+        yield event;
+        continue;
+      }
+      usage = event.usage;
+    }
+
+    // A provider that streams but reports nothing still has to be accounted for. The
+    // estimate keeps the ledger populated; `usageEstimated` on the adapter is where
+    // it gets said out loud.
+    const final: Usage = usage ?? {
+      calls: 1,
+      inputTokens: estimateTokens(`${req.system ?? ""}\n${req.input}`),
+      outputTokens: estimateTokens(text),
+    };
+    this.#record(req, final);
+    yield { kind: "usage", usage: final };
   }
 
   /** Rows, most expensive first — i.e. the ones worth cutting. */

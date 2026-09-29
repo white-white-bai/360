@@ -1,11 +1,12 @@
-import type { Completion, CompletionRequest, ModelProvider } from "./types.ts";
+import type { Completion, CompletionRequest, ModelProvider, StreamEvent } from "./types.ts";
 import { estimateTokens } from "../util/tokens.ts";
+import { StepScanner } from "../session/explanation.ts";
 
 /**
  * A provider seeded with canned responses, so the pipeline can be exercised
  * deterministically and offline.
  *
- * A recorded-response fixture, not a model. Two behaviours are deliberate:
+ * A recorded-response fixture, not a model. Three behaviours are deliberate:
  *
  *   - An actor with no script is an ERROR, not an empty string. A missing fixture
  *     usually means a call site was added without anyone deciding what that actor
@@ -15,16 +16,22 @@ import { estimateTokens } from "../util/tokens.ts";
  *     happens — and each call must return something different. Running past the
  *     end of a sequence is also an error, because a fixture that quietly repeats
  *     would let a runaway loop look like a passing test.
+ *   - It STREAMS, by cutting the recorded text at step boundaries. The pacing is
+ *     simulated — a real model gets it from the network — and it exists so the live
+ *     board can be looked at without a provider account. It is not evidence that a
+ *     provider streams well.
  */
 export class ScriptedProvider implements ModelProvider {
   #script: Map<string, string[]>;
   #used: Map<string, number>;
+  #chunkDelayMs: number;
 
-  constructor(script: Record<string, string | string[]>) {
+  constructor(script: Record<string, string | string[]>, options: { chunkDelayMs?: number } = {}) {
     this.#script = new Map(
       Object.entries(script).map(([actor, value]) => [actor, Array.isArray(value) ? [...value] : [value]]),
     );
     this.#used = new Map();
+    this.#chunkDelayMs = options.chunkDelayMs ?? 0;
   }
 
   async complete(req: CompletionRequest): Promise<Completion> {
@@ -53,4 +60,41 @@ export class ScriptedProvider implements ModelProvider {
       },
     };
   }
+
+  async *stream(req: CompletionRequest): AsyncIterable<StreamEvent> {
+    const completion = await this.complete(req);
+
+    for (const chunk of cutAtStepBoundaries(completion.text)) {
+      if (this.#chunkDelayMs > 0) await sleep(this.#chunkDelayMs);
+      yield { kind: "delta", text: chunk };
+    }
+    yield { kind: "usage", usage: completion.usage };
+  }
+}
+
+/**
+ * Cut a recorded turn where its steps end.
+ *
+ * Uses the same scanner the session does, so the chunks a fixture produces and the
+ * chunks a session expects cannot drift apart — a fixture that cut in the wrong
+ * places would make the session's own consistency check fail, which is the right
+ * outcome but a confusing one to debug.
+ */
+export function cutAtStepBoundaries(text: string): string[] {
+  const scanner = new StepScanner();
+  scanner.push(text);
+  const ends = scanner.boundaries;
+
+  const chunks: string[] = [];
+  let from = 0;
+  for (const end of ends) {
+    chunks.push(text.slice(from, end));
+    from = end;
+  }
+  chunks.push(text.slice(from));
+  return chunks.filter((chunk) => chunk !== "");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

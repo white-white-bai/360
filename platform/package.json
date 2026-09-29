@@ -13,6 +13,7 @@
     "apparatus": "node src/session/run-apparatus.ts",
     "validate": "node src/validate/run-validate.ts",
     "experiment": "node src/experiment/run-experiment.ts",
+    "board": "node src/ui/serve.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test"
   },

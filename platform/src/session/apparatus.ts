@@ -9,16 +9,15 @@ import type { SessionLog } from "../events/log.ts";
 import { appendAnswer, emptyLog, nextAt } from "../events/log.ts";
 import type { LedgerRow } from "../providers/meter.ts";
 import { SpendMeter } from "../providers/meter.ts";
+import { runTurn } from "./stream.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import type { Surface } from "../render/render.ts";
 import { render } from "../render/render.ts";
 import type { Probe, ProbeOutcome, SemanticVerdict } from "./contracts.ts";
 import { parseProbeOutcome, parseProbes, parseSemanticVerdicts } from "./contracts.ts";
 import type { ExplanationStep } from "./explanation.ts";
-import { parseExplanation } from "./explanation.ts";
 import { BLACKBOARD_CONTRACT, corpusBlock, framing, glossaryBlock, misconceptionBlock } from "./prompt.ts";
 import type { SessionStore } from "./store.ts";
-import { applySteps } from "./turn.ts";
 
 /** Actor ids. One line each in the ledger, and one per ADR 0004's independence rule. */
 export const ACTOR = {
@@ -206,6 +205,15 @@ export interface ApparatusInput {
    * recall of a question the learner has just been shown the answer to.
    */
   retakeCheck?: UnderstandingCheck;
+  /**
+   * Called after each step lands, so a live board can redraw.
+   *
+   * The session neither knows nor cares whether anyone is watching. This is how the
+   * blackboard stays a pure function of the events while still being shown as they
+   * arrive — the alternative would be a second, incremental renderer, and then two
+   * boards to keep in agreement.
+   */
+  onStep?: (log: SessionLog, step: ExplanationStep) => void;
   sessionId?: string;
   store?: SessionStore;
   /**
@@ -360,14 +368,24 @@ export async function runApparatusSession(
   }
 
   // 5 — the narration, with the probes placed inside it.
-  const narrationTurn = await meter.complete({
-    actor: ACTOR.explainer,
-    model: MODEL,
-    system: narrationPrompt(expert, list, probes),
-    input: "Teach the verified claims.",
-  });
+  //
+  // Streamed, because this is where the board fills (ADR 0005). The probes are
+  // substituted per step as it lands: doing it afterwards would put probe IDs on the
+  // board while the turn was arriving.
+  const narration = await runTurn(
+    meter,
+    {
+      actor: ACTOR.explainer,
+      model: MODEL,
+      system: narrationPrompt(expert, list, probes),
+      input: "Teach the verified claims.",
+    },
+    emptyLog(sessionId),
+    "lead-explainer",
+    { prepare: (step) => speakOne(step, probes), onStep: input.onStep },
+  );
   phases.push("narration");
-  let log = applySteps(emptyLog(sessionId), speakProbes(parseExplanation(narrationTurn.text).steps, probes), "lead-explainer");
+  let log = narration.log;
 
   // 6 — the terminal check. The same hand-authored asset in every condition.
   const verdict = gradeObjectively(check, input.terminalAnswer);
@@ -407,24 +425,36 @@ export async function runApparatusSession(
       verdict.diagnosis?.misconceptionId ??
       null;
 
-    const challengeTurn = await meter.complete({
-      actor: ACTOR.challenger,
-      model: MODEL,
-      system: challengePrompt(expert, list),
-      input: JSON.stringify({ triggers, targetMisconception: target }),
-    });
+    const challenge = await runTurn(
+      meter,
+      {
+        actor: ACTOR.challenger,
+        model: MODEL,
+        system: challengePrompt(expert, list),
+        input: JSON.stringify({ triggers, targetMisconception: target }),
+      },
+      log,
+      "challenger",
+      { onStep: input.onStep },
+    );
     phases.push("challenger");
-    log = applySteps(log, speakProbes(parseExplanation(challengeTurn.text).steps, []), "challenger");
+    log = challenge.log;
 
     // 9 — a retry realises the same claims with different words.
-    const retryTurn = await meter.complete({
-      actor: ACTOR.explainer,
-      model: MODEL,
-      system: narrationPrompt(expert, list, []),
-      input: "Teach the same claims again, differently. Change how you say it, not what you say.",
-    });
+    const retry = await runTurn(
+      meter,
+      {
+        actor: ACTOR.explainer,
+        model: MODEL,
+        system: narrationPrompt(expert, list, []),
+        input: "Teach the same claims again, differently. Change how you say it, not what you say.",
+      },
+      log,
+      "lead-explainer",
+      { onStep: input.onStep },
+    );
     phases.push("re-teach");
-    log = applySteps(log, speakProbes(parseExplanation(retryTurn.text).steps, []), "lead-explainer");
+    log = retry.log;
   }
 
   // 10 — the second sitting.
@@ -480,6 +510,12 @@ export async function runApparatusSession(
     phases,
     disabled,
   };
+}
+
+/** The same substitution, for one step at a time — the shape a streamed turn needs. */
+function speakOne(step: ExplanationStep, probes: readonly Probe[]): ExplanationStep {
+  const spoken = speakProbes([step], probes);
+  return spoken[0] as ExplanationStep;
 }
 
 /**

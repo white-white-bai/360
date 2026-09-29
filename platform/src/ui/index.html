@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>黑板 — agent teaching platform</title>
+<style>
+  :root {
+    --board: #16302a;
+    --board-edge: #0d1f1b;
+    --chalk: #eef3ee;
+    --dim: #9fb3aa;
+    --accent: #f2d06b;
+    --attention: #ef8a63;
+    --grid: #2c4a42;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    height: 100vh;
+    display: grid;
+    grid-template-columns: 30% 1fr;
+    background: #101a17;
+    color: var(--chalk);
+    font: 15px/1.65 "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", serif;
+  }
+  header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    padding: 10px 18px;
+    background: #0b1512;
+    border-bottom: 1px solid #23372f;
+    font-size: 13px;
+    color: var(--dim);
+  }
+  header b { color: var(--chalk); font-size: 15px; }
+  #clock { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  #narration {
+    overflow-y: auto;
+    padding: 18px 20px 40vh;
+    background: #0e1815;
+    border-right: 1px solid #23372f;
+  }
+  #narration .chunk { margin: 0 0 14px; }
+  #narration .who {
+    display: block;
+    font-size: 11px;
+    letter-spacing: .14em;
+    color: var(--dim);
+    margin-bottom: 3px;
+  }
+  #narration .chunk.challenger .who { color: var(--attention); }
+
+  #board {
+    position: relative;
+    overflow-y: auto;
+    padding: 26px 32px 40vh;
+    background: radial-gradient(120% 100% at 20% 0%, #1b3a32 0%, var(--board) 60%, var(--board-edge) 100%);
+  }
+  .empty { color: var(--dim); font-style: italic; }
+
+  .row {
+    position: relative;
+    margin: 0 0 14px;
+    padding: 2px 8px;
+    border-left: 3px solid transparent;
+  }
+  .row.highlighted {
+    border-left-color: var(--accent);
+    background: rgba(242, 208, 107, .07);
+  }
+  .row.pointer::after {
+    content: "← 在这里";
+    position: absolute;
+    right: 0;
+    top: 0;
+    font-size: 12px;
+    color: var(--accent);
+  }
+  .row .tag {
+    font-size: 11px;
+    letter-spacing: .1em;
+    color: var(--dim);
+    margin-right: 8px;
+  }
+  .ensure { animation: land .45s ease-out; }
+  @keyframes land { from { opacity: 0; transform: translateY(5px); } }
+
+  svg.axis { width: 100%; max-width: 720px; height: 74px; display: block; }
+  svg.axis .rail { stroke: var(--grid); stroke-width: 2; }
+  svg.axis .tick { stroke: var(--dim); stroke-width: 1; }
+  svg.axis .ticklabel { fill: var(--dim); font-size: 11px; text-anchor: middle; font-family: ui-monospace, monospace; }
+  svg.axis .band { fill: var(--grid); opacity: .85; }
+  svg.axis .band.attention { fill: var(--attention); opacity: .8; }
+  svg.axis .bandlabel { fill: var(--chalk); font-size: 11px; text-anchor: middle; font-family: ui-monospace, monospace; }
+
+  table.board { border-collapse: collapse; font-family: ui-monospace, monospace; font-size: 13px; }
+  table.board th, table.board td { border: 1px solid var(--grid); padding: 3px 10px; }
+  table.board th { color: var(--accent); font-weight: 500; }
+
+  pre.rich {
+    margin: 4px 0; padding: 10px 12px;
+    background: #0e1a17; border: 1px dashed var(--grid);
+    font-family: ui-monospace, monospace; font-size: 12.5px; white-space: pre-wrap;
+  }
+  .connector { color: var(--accent); font-family: ui-monospace, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <b>黑板</b>
+  <span id="who"></span>
+  <span id="status">连接中…</span>
+  <span id="clock"></span>
+</header>
+
+<div id="narration"><p class="empty">还没有人开口。</p></div>
+<div id="board"><p class="empty">黑板是空的。</p></div>
+
+<script>
+const board = document.getElementById("board");
+const narration = document.getElementById("narration");
+const status = document.getElementById("status");
+const who = document.getElementById("who");
+const clock = document.getElementById("clock");
+
+const ROLE = { "lead-explainer": "主讲", challenger: "质疑者" };
+
+/** Escape, because the board shows text produced by a model feeding on a corpus. */
+function esc(text) {
+  return String(text).replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+/**
+ * Draw an axis, with the bands that were declared "on" it.
+ *
+ * This is the only place coordinates exist. The events never carried any — an axis
+ * says what range it covers and a band says which axis it belongs to, and the pixels
+ * are this renderer's problem. That is why a second renderer is possible at all.
+ */
+function axisSvg(axis, bands) {
+  const W = 720, PAD = 40, RAIL = 34, H = 74;
+  const span = (axis.to - axis.from) || 1;
+  const x = (value) => PAD + ((value - axis.from) / span) * (W - 2 * PAD);
+
+  const rects = bands.map((band) => {
+    const left = x(band.from), right = x(band.to);
+    return `<rect class="band ${band.emphasis}" x="${left}" y="${RAIL - 9}"
+      width="${Math.max(2, right - left)}" height="18" rx="3"></rect>
+      <text class="bandlabel" x="${(left + right) / 2}" y="${RAIL + 24}">${esc(band.label)}</text>`;
+  }).join("");
+
+  const ticks = (axis.marks || []).map((mark) => `
+    <line class="tick" x1="${x(mark.value)}" x2="${x(mark.value)}" y1="${RAIL - 16}" y2="${RAIL + 8}"></line>
+    <text class="ticklabel" x="${x(mark.value)}" y="${RAIL + 44}">${esc(mark.value)}${mark.label ? " " + esc(mark.label) : ""}</text>
+  `).join("");
+
+  return `<svg class="axis" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMinYMin meet">
+    <line class="rail" x1="${PAD - 12}" x2="${W - PAD + 12}" y1="${RAIL}" y2="${RAIL}"></line>
+    ${rects}${ticks}
+  </svg>`;
+}
+
+function renderElement(element, bands) {
+  const classes = ["row", element.highlighted ? "highlighted" : ""].join(" ");
+  switch (element.kind) {
+    case "text":
+      return `<div class="${classes}">${esc(element.body)}</div>`;
+    case "shape":
+      return `<div class="${classes}"><span class="tag">${esc(element.shape)}</span>
+        <span class="connector">${esc(element.from)} → ${esc(element.to)}</span></div>`;
+    case "axis":
+      return `<div class="${classes}"><span class="tag">轴 · ${esc(element.label)}</span>
+        ${axisSvg(element, bands.filter((b) => b.axis === element.id))}</div>`;
+    case "band":
+      // Drawn inside its axis when that axis is on the board; otherwise shown as a
+      // statement, because a band without its rail is still information.
+      return bands.includes(element) ? "" :
+        `<div class="${classes}"><span class="tag">区间</span>${esc(element.axis)}
+         ${esc(element.from)}–${esc(element.to)} ${esc(element.label)}</div>`;
+    case "table":
+      return `<div class="${classes}"><table class="board">
+        <tr>${element.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr>
+        ${element.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}
+      </table></div>`;
+    case "rich":
+      return `<div class="${classes}"><span class="tag">富内容 · ${esc(element.format)}</span>
+        <pre class="rich">${esc(element.body)}</pre></div>`;
+    default:
+      return `<div class="${classes}"><span class="tag">未知元素</span>${esc(JSON.stringify(element))}</div>`;
+  }
+}
+
+function draw(surface) {
+  const bands = surface.elements.filter((e) => e.kind === "band");
+  const markup = surface.elements
+    .filter((e) => e.kind !== "band" || !surface.elements.some((a) => a.kind === "axis" && a.id === e.axis))
+    .map((element) => renderElement(element, bands))
+    .join("");
+
+  // Re-built rather than appended to: the Surface is the whole board, and diffing
+  // it here would be a second, incremental renderer to keep in agreement.
+  board.innerHTML = markup || '<p class="empty">黑板是空的。</p>';
+  if (surface.pointer) {
+    const rows = [...board.querySelectorAll(".row")];
+    rows[rows.length - 1]?.classList.add("pointer");
+  }
+  const last = board.lastElementChild;
+  if (last) last.classList.add("ensure");
+  board.scrollTop = board.scrollHeight;
+}
+
+function drawNarration(chunks) {
+  narration.innerHTML = chunks.map((chunk) => `
+    <p class="chunk ${chunk.actor}"><span class="who">${esc(ROLE[chunk.actor] || chunk.actor)}</span>${esc(chunk.text)}</p>
+  `).join("") || '<p class="empty">还没有人开口。</p>';
+  narration.scrollTop = narration.scrollHeight;
+}
+
+const source = new EventSource("/board");
+let landed = 0;
+
+source.addEventListener("meta", (message) => {
+  const meta = JSON.parse(message.data);
+  who.textContent = meta.expert;
+  status.textContent = meta.mode === "live" ? "实时 provider" : "夹具回放";
+});
+
+source.addEventListener("surface", (message) => {
+  const payload = JSON.parse(message.data);
+  landed += 1;
+  clock.textContent = `已落第 ${landed} 步`;
+  draw(payload.surface);
+  drawNarration(payload.narration);
+});
+
+source.addEventListener("done", (message) => {
+  const result = JSON.parse(message.data);
+  const final = result.retaken ? "重考" : "首考";
+  status.textContent = `${result.passed ? "通过" : "未通过"}（${final} · ${result.checkId}）`;
+  source.close();
+});
+
+source.addEventListener("failed", (message) => {
+  status.textContent = "出错：" + message.data;
+});
+</script>
+</body>
+</html>

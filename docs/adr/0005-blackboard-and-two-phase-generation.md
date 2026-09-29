@@ -20,6 +20,8 @@ A single explanation is produced in two phases. First the expert emits an **Asse
 
 The product promises a real-time blackboard and interruptible teaching, and the verification stack cannot be run after a full explanation without destroying that promise. Verifying a list is cheap — it is an order of magnitude shorter than the narration it produces — so the expensive check happens once, on a small artifact, while the learner-facing output stays streaming. **Real-time starts when the list passes, not when the learner asks.**
 
+**Streaming is a delivery mechanism, not a second source of truth.** Steps are shown as they arrive, but the turn is only accepted if the board the learner watched is the board the finished turn describes — a stream that diverges from the parse is refused, because the alternative is a session record that contradicts what was taught. Two consequences follow. A live board redraws from the *events*, not from the deltas, so there is still exactly one renderer. And a provider that cannot stream is still a valid provider: it arrives in one piece, and nothing else about the session changes.
+
 Three things this buys beyond latency:
 
 - blackboard events follow the list, so the board is scripted rather than improvised mid-sentence, and pacing becomes controllable;

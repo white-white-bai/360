@@ -92,3 +92,90 @@ export function offsetSteps(explanation: Explanation, base: number): Explanation
     }),
   };
 }
+
+/**
+ * Pull complete steps out of a partially-arrived `{"steps":[...]}` document.
+ *
+ * ADR 0005 promises the blackboard shows the teaching as it is SAID, so waiting for
+ * the closing brace would throw away the only thing streaming was for. This scans
+ * for complete step objects as the text arrives.
+ *
+ * It is a SCANNER, not a parser: brace depth and string state, and no opinion about
+ * what the objects mean. The authoritative parse still happens on the finished text
+ * and a disagreement between the two is an error — so a bug in here can change what
+ * was SHOWN while a turn arrived, never what was taught.
+ *
+ * It lives beside the parser because it reads the same contract; that a fixture
+ * provider also uses it to cut a recorded response into plausible chunks is a
+ * consequence of that, not a reason to duplicate the rules.
+ */
+export class StepScanner {
+  #buffer = "";
+  #ends: number[] = [];
+  #inArray = false;
+  #depth = 0;
+  #inString = false;
+  #escaped = false;
+  #start = -1;
+
+  /** Feed a delta; get back any step objects that have just become complete. */
+  push(delta: string): string[] {
+    const complete: string[] = [];
+
+    for (const character of delta) {
+      this.#buffer += character;
+
+      if (this.#escaped) {
+        this.#escaped = false;
+        continue;
+      }
+      if (this.#inString) {
+        if (character === "\\") this.#escaped = true;
+        else if (character === '"') this.#inString = false;
+        continue;
+      }
+      if (character === '"') {
+        this.#inString = true;
+        continue;
+      }
+
+      if (!this.#inArray) {
+        // Only the `[` that opens the `steps` array starts a capture, so a model that
+        // says something before the JSON cannot shift the window.
+        if (character === "[" && /"steps"\s*:\s*\[$/.test(this.#buffer)) this.#inArray = true;
+        continue;
+      }
+
+      if (character === "{") {
+        if (this.#depth === 0) this.#start = this.#buffer.length - 1;
+        this.#depth += 1;
+        continue;
+      }
+      if (character === "}") {
+        if (this.#depth === 0) continue;
+        this.#depth -= 1;
+        if (this.#depth === 0 && this.#start >= 0) {
+          complete.push(this.#buffer.slice(this.#start));
+          this.#ends.push(this.#buffer.length);
+          this.#start = -1;
+        }
+        continue;
+      }
+      if (character === "]") {
+        // Only the `]` that closes the `steps` array ends the capture. A step may
+        // contain arrays of its own — an axis has `marks` — and treating their `]`
+        // as the end silently truncates the turn: the learner sees the first few
+        // steps and then nothing, with no error anywhere.
+        if (this.#depth === 0) this.#inArray = false;
+        continue;
+      }
+    }
+
+    return complete;
+  }
+
+  /** Buffer offsets just past each completed step — where a replay of a turn cuts. */
+  get boundaries(): number[] {
+    return [...this.#ends];
+  }
+}
