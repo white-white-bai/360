@@ -18,7 +18,15 @@ export interface MisconceptionDiagnosis {
 
 export interface UnderstandingCheck {
   id: string;
-  /** The transfer situation. Must differ from the situation the explanation used. */
+  /**
+   * The situation put to the learner. Must differ from the situation the explanation
+   * used — re-asking what was just said measures recall.
+   *
+   * This used to read "the transfer situation", from when a check was only ever the
+   * transfer task. Transfer is now a separate measurement with its own asset, chosen by
+   * the caller (ADR 0001), and calling every prompt a transfer would have made the two
+   * impossible to tell apart.
+   */
   prompt: string;
   expected: string;
   /** Corpus passage ids the answer must be consistent with (ADR 0004). */

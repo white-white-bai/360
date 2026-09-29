@@ -100,12 +100,33 @@ async function main(): Promise<void> {
 
   console.log(`\n开始上课：${describeExpert(expert)}`);
 
-  const check = findCheck(expert.domain.checks, "C-gap");
+  // The checks come from whichever Domain was chosen, not from a hard-coded id. Entry is
+  // the one path that crosses Domains, so a hard-coded `C-gap` would mean adding a Domain
+  // silently broke the way in — which is exactly what it did before this line.
+  const terminalChecks = expert.domain.checks.filter((candidate) => !candidate.id.startsWith("T-"));
+  const check = terminalChecks[0];
+  if (check === undefined) {
+    console.error(`\n${expert.domain.id} has no terminal check, so there is nothing to run.`);
+    process.exitCode = 1;
+    return;
+  }
+
+  // The recorded responses below were scripted for the time-zones lesson. A scripted
+  // demo of another Domain would be that fixture wearing its name, so the flow stops at
+  // the choice and says why, rather than passing one lesson's script off as another's.
+  if (expert.domain.id !== "time-zones") {
+    console.log(`\n选择完成：${describeExpert(expert)}`);
+    console.log("  这份演示只有 time-zones 的录制脚本。换 Domain 需要一套新的录制，");
+    console.log("  所以到此为止，而不是拿别的课的脚本冒充这一课。");
+    console.log(`  这门 Domain 的资产可以用 \`npm run validate\` 检查。`);
+    return;
+  }
+
   let board = "";
   const result = await runApparatusSession(new ScriptedProvider(misconceptionScript()), {
     expert,
     check,
-    retakeCheck: findCheck(expert.domain.checks, "C-overlap"),
+    retakeCheck: terminalChecks[1],
     probeAnswers: ["夏令时就是把偏移量改一下"],
     terminalAnswer: "这个本地时间正常存在，只是偏移量不同",
     retryAnswer: "这个本地时间出现两次，只给本地时间无法确定是哪一次",
