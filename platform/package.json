@@ -15,6 +15,7 @@
     "experiment": "node src/experiment/run-experiment.ts",
     "board": "node src/ui/serve.ts",
     "enter": "node src/session/run-entry.ts",
+    "classroom": "node src/session/run-classroom.ts",
     "build-domain": "node src/build/build-domain.ts",
     "review-domain": "node src/build/review-domain.ts",
     "typecheck": "tsc --noEmit",
