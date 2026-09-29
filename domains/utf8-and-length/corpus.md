@@ -1,12 +1,10 @@
 <!--
-NOT SIGNED OFF. The machine comparison below is recorded; the human acceptance
-in `meta.md` is TODO, and `npm run validate` reports it. That is the right state
-for a Domain nobody has vouched for yet — a machine comparison is not a sign-off.
+REVIEWED. Signed off by 白杨 on 2026-09-29 against the machine-check record below.
 
 These are STATEMENTS the cited source supports, written in our own words. They
 are NOT quotations. Do not treat any sentence here as the source's wording.
 
-Machine-checked 2026-09-28 against the primary document, which was fetched and
+Machine-checked 2026-09-29 against the primary document, which was fetched and
 read in full (RFC 3629, 14 pages, including the sections that are not cited
 here). Every passage cites a section that was actually opened:
 
