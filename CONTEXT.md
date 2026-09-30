@@ -10,6 +10,22 @@ A platform that teaches a learner a chosen topic through a guided, visual classr
 The set of Domains a learner may choose from at entry. Its length is an honest statement of what the platform can actually teach.
 _Avoid_: Menu, marketplace, store, list
 
+**Profession**:
+The industry a learner names at entry — the door, not the lesson. A Profession holds a tier, a risk, a boundary (what will NOT be taught here), and a list of Domains. Its status is computed, never stored: open when a listed Domain is signed, planned when none is, closed when its risk is high. The skeleton is the official occupation classification; folk names ("三百六十行") are aliases, not taxonomy.
+_Avoid_: Industry, job, career, trade
+
+**Tier**:
+How much of a Profession can be taught: A — text-verifiable knowledge, the full apparatus; B — standards-and-diagrams knowledge, taught with the note that it does not replace practice; C — embodied skill, where only the cognitive layer is taught and the boundary says so. Tier is independent of Risk.
+_Avoid_: Level, grade, difficulty
+
+**Risk**:
+What happens if the platform teaches this wrong: ordinary, or high (people, property, or rights). A high-risk Profession is closed — it lists no Domains and both doors refuse its topics — until two independent reviewers can sign, which no Domain can yet do.
+_Avoid_: Severity, danger, safety
+
+**Category**:
+A group of Professions from the official classification, shown at entry so the learner sees the shape of what exists. A category is not a Profession and teaches nothing.
+_Avoid_: Section, division, bucket
+
 ### The teaching interaction
 
 **Teaching**:

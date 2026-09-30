@@ -15,6 +15,7 @@ import { composeExpert, loadLibrary } from "../experts/load.ts";
 import { describeExpert } from "../experts/types.ts";
 import { PROFILES } from "../experiment/fixtures-experiment.ts";
 import { configuredModels, defaultModel, selectLiveProvider } from "../providers/live.ts";
+import { highRiskRefusal, loadProfessions, professionOptions, type ProfessionIndex } from "../professions/load.ts";
 import { ScriptedProvider } from "../providers/scripted.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import { render } from "../render/render.ts";
@@ -201,6 +202,13 @@ export function createBoardServer(options: BoardOptions = {}): Server {
    */
   const freshLibrary = (): ReturnType<typeof loadLibrary> => loadLibrary(undefined, undefined, domainsDir);
 
+  /**
+   * The industry catalogue, read per request like the library (ADR 0012).
+   * A Profession's status is computed from what is signed RIGHT NOW, so a
+   * signature on the board must be visible here without a restart.
+   */
+  const freshProfessions = (): ProfessionIndex => loadProfessions();
+
   return createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
 
@@ -325,8 +333,10 @@ export function createBoardServer(options: BoardOptions = {}): Server {
       // What the page may offer (ADR 0009). A snapshot rather than a session: the choices travel
       // with the connection that starts the lesson, and nothing is kept between the two requests.
       let offered: ReturnType<typeof catalogue>;
+      let professions: ProfessionIndex;
       try {
         offered = catalogue(freshLibrary());
+        professions = freshProfessions();
       } catch (error) {
         response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
         response.end(`读不到教材目录：${error instanceof Error ? error.message : String(error)}`);
@@ -339,6 +349,9 @@ export function createBoardServer(options: BoardOptions = {}): Server {
           live: selection !== null || options.provider !== undefined,
           provider: options.provider !== undefined ? "an injected provider" : (selection?.describe ?? null),
           domains: offered.domains,
+          // The industry door (ADR 0012): grouped by category, each entry carrying
+          // its computed status — open, planned, or closed — never a stored claim.
+          professions: professionOptions(professions, new Set(offered.domains.map((domain) => domain.id))),
           styles: offered.styles,
           personas: offered.personas,
           models,
@@ -468,6 +481,24 @@ export function createBoardServer(options: BoardOptions = {}): Server {
       const topic = (url.searchParams.get("topic") ?? "").trim();
       if (topic === "") {
         send("failed", "直接课堂要先写一个主题——写你想学的那个东西，老师就讲它");
+        response.end();
+        return;
+      }
+
+      // The closed-profession door (ADR 0012): the direct classroom is
+      // unverified by design, so a high-risk industry is refused here
+      // before any model is called — a disclaimer is not a guardrail.
+      let professions: ProfessionIndex;
+      try {
+        professions = freshProfessions();
+      } catch (error) {
+        send("failed", `读不到行业目录：${error instanceof Error ? error.message : String(error)}`);
+        response.end();
+        return;
+      }
+      const closed = highRiskRefusal(professions, topic);
+      if (closed !== undefined) {
+        send("failed", closed);
         response.end();
         return;
       }
@@ -660,6 +691,26 @@ export function createBoardServer(options: BoardOptions = {}): Server {
           return;
         }
         wantsBuild = true;
+      }
+    }
+
+    // The other half of the closed-profession door (ADR 0012): a topic no
+    // Domain and no draft matches would be BUILT, and building material for
+    // a high-risk industry is exactly what must not happen unattended.
+    if (wantsBuild) {
+      let professions: ProfessionIndex;
+      try {
+        professions = freshProfessions();
+      } catch (error) {
+        send("failed", `读不到行业目录：${error instanceof Error ? error.message : String(error)}`);
+        response.end();
+        return;
+      }
+      const closed = highRiskRefusal(professions, requestedTopic);
+      if (closed !== undefined) {
+        send("failed", closed);
+        response.end();
+        return;
       }
     }
 

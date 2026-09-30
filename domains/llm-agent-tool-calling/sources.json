@@ -1,16 +1,6 @@
 [
   {
     "index": 0,
-    "requested": "https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview",
-    "url": "https://claude.com/app-unavailable-in-region",
-    "fetchedAt": "2026-09-29T06:26:26.412Z",
-    "mediaType": "text/html",
-    "sha256": "a98c23dc8c55088aafb0cb48b44cf7aad297c95c0fcfd2247e883bf5d5508d64",
-    "bytes": 447830,
-    "text": "sources/00-claude-com-app-unavailable-in-region.txt"
-  },
-  {
-    "index": 1,
     "requested": "https://modelcontextprotocol.io/specification/2025-06-18",
     "url": "https://modelcontextprotocol.io/specification/2025-06-18",
     "fetchedAt": "2026-09-29T06:26:26.947Z",
@@ -20,17 +10,17 @@
     "text": "sources/01-modelcontextprotocol-io-specification-2025-06-18.txt"
   },
   {
-    "index": 2,
+    "index": 1,
     "requested": "https://json-schema.org/draft/2020-12/json-schema-core.html",
     "url": "https://json-schema.org/draft/2020-12/json-schema-core",
     "fetchedAt": "2026-09-29T06:26:28.797Z",
     "mediaType": "text/html",
-    "sha256": "b104808267c75a61444912cf450818a6af17745abe27b2f8d2cf173868e62266",
+    "sha256": "b104808267c75a6144912cf450818a6af17745abe27b2f8d2cf173868e62266",
     "bytes": 342564,
     "text": "sources/02-json-schema-org-draft-2020-12-json-schema-core.txt"
   },
   {
-    "index": 3,
+    "index": 2,
     "requested": "https://openai.github.io/openai-agents-python/",
     "url": "https://openai.github.io/openai-agents-python/",
     "fetchedAt": "2026-09-29T06:26:29.214Z",

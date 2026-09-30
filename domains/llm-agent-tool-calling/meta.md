@@ -6,7 +6,6 @@ corpusReviewedBy: baiyang
 corpusReviewedOn: 2026-09-29
 deliveryLanguage: zh
 sources:
-  - https://claude.com/app-unavailable-in-region
   - https://modelcontextprotocol.io/specification/2025-06-18
   - https://json-schema.org/draft/2020-12/json-schema-core
   - https://openai.github.io/openai-agents-python/

@@ -1,13 +1,32 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
 ## What this is
 
-A collection of agent skills (Matt Pocock-style "engineering skills") for a CLI coding agent — not a software project. There is no build, lint, test, or package tooling and no git repo. Working here means reading, writing, or maintaining these skills.
+Two things in one repo:
+
+1. **A teaching platform** (`platform/`) — TypeScript on Node ≥22.6, run directly with type-stripping (no bundler, no framework, no runtime deps; dev deps are `typescript` and `@types/node`). The web entry is one static page (`platform/src/ui/index.html`) served by one `node:http` server (`platform/src/ui/serve.ts`). Knowledge assets live as plain markdown: `domains/` (signed, teachable Domains), `domains-draft/` (unsigned drafts, gitignored), `library/` (product-wide Personas and Styles), `professions/` (the industry catalogue, ADR 0012).
+2. **A collection of agent skills** (`.commandcode/skills/`) — Matt Pocock-style engineering skills. ADR 0001 settled that this is an asset library for expert roles, not part of the delivery vehicle.
+
+Working here means reading, writing, or maintaining both. There is no build, lint, or test tooling at the repo root; everything runs from `platform/`.
+
+## Platform commands (run in `platform/`)
+
+- `npm run board` — the web entry (http server + single-page UI)
+- `npm run validate` — check every knowledge asset against the rules in `src/validate/rules.ts`; exits non-zero on errors, zero on warnings
+- `npm test` — `node --test` over `platform/test/`
+- `npm run typecheck` — `tsc --noEmit`
+- `npm run build-domain -- "<topic>"` / `npm run review-domain -- <id>` — build a Domain on demand from fetched sources, then sign it (ADR 0010)
+- `npm run enter` / `npm run classroom` — terminal entry points
 
 ## Layout
 
+- `platform/src/` — kernel, sessions, builder, validator, providers, web UI
+- `domains/<id>/` — `meta.md`, `corpus.md`, `misconceptions.md`, `glossary.md`, `checks.md`, plus `sources.json` and `sources/` (gitignored) for built Domains
+- `professions/professions.md` — categories and Professions with tier (A/B/C) and risk (ordinary/high); status is computed from signatures, never stored
+- `library/personas/`, `library/styles/` — the shared axes
+- `docs/adr/` — architecture decisions; `CONTEXT.md` is the glossary the code's vocabulary must follow
 - `.commandcode/skills/<skill-name>/` — one directory per skill:
   - `SKILL.md` — the skill definition. YAML frontmatter keys: `name` (kebab-case, matches dir name), `description` (when the model may invoke it), optional `disable-model-invocation: true` (user-invoked slash command only) and `argument-hint`.
   - `agents/openai.yaml` — a short interface block (`display_name`, `short_description`) consumed by agent tooling; not referenced from SKILL.md prose.

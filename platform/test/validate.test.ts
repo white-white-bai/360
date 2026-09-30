@@ -47,6 +47,33 @@ function tmpRoot(t: { after: (fn: () => void) => void }, options: { seed?: boole
   mkdirSync(join(root, "personas"), { recursive: true });
   mkdirSync(join(root, "styles"), { recursive: true });
   mkdirSync(join(root, "domains"), { recursive: true });
+  // A catalogue of the test's own: the real one lists Domains that do
+  // not exist here, and a validator run against another repo's catalogue
+  // would report every one of them as an error.
+  writeFileSync(
+    join(root, "professions.md"),
+    [
+      "---",
+      "skeleton: test",
+      "---",
+      "",
+      "## test-category",
+      "kind: category",
+      "name: 测试大类",
+      "scope: 测试",
+      "",
+      "## test-profession",
+      "kind: profession",
+      "name: 测试职业",
+      "category: test-category",
+      "tier: A",
+      "risk: ordinary",
+      "boundary: 只用于测试",
+      "domains:",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
   if (options.seed !== false) seedLibrary(root);
   return root;
 }
@@ -111,6 +138,7 @@ function run(root: string): { codes: string[]; errors: number; warnings: number 
     personasDir: join(root, "personas"),
     stylesDir: join(root, "styles"),
     domainsDir: join(root, "domains"),
+    professionsFile: join(root, "professions.md"),
   });
   return {
     codes: report.findings.map((f: Finding) => f.code),

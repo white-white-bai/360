@@ -1,10 +1,12 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { DOMAINS_DIR, PERSONAS_DIR, STYLES_DIR } from "../catalog.ts";
+import { DOMAINS_DIR, PERSONAS_DIR, PROFESSIONS_FILE, STYLES_DIR } from "../catalog.ts";
 import type { Domain, Persona, Style } from "../experts/types.ts";
 import { loadDomain, loadPersona, loadStyle } from "../experts/load.ts";
 import { findPassage } from "../grounding/corpus.ts";
+import { loadProfessions, type ProfessionIndex } from "../professions/load.ts";
+import { unusableSourceReason } from "../build/fetch.ts";
 import type { Finding, Severity, ValidationReport } from "./types.ts";
 
 /**
@@ -148,6 +150,96 @@ function validateCorpus(domain: Domain, dir: string): Finding[] {
         "verify each passage against its cited source, then replace the banner with the record",
       ),
     );
+  }
+
+  findings.push(...validateSourceManifest(dir, domain));
+
+  return findings;
+}
+
+/**
+ * The sources a Domain recorded, re-checked after the fact (ADR 0012).
+ *
+ * The fetcher refuses an error page at build time, but a Domain can also be
+ * hand-curated — and two signed Domains once carried a region-block page as
+ * a source, because nobody re-read the manifest. So the validator does what
+ * the fetcher would have done: any URL that names an error page is an error,
+ * and a fetch that resolved to a different host than it asked for is a
+ * warning the reviewer should have seen.
+ */
+function validateSourceManifest(dir: string, domain: Domain): Finding[] {
+  const findings: Finding[] = [];
+
+  for (const source of domain.sources) {
+    for (const url of source.match(/https?:\/\/[^\s]+/g) ?? []) {
+      const reason = unusableSourceReason(url);
+      if (reason !== undefined) {
+        findings.push(
+          finding(
+            "error",
+            "corpus.source-unusable",
+            `domains/${domain.id}/meta.md`,
+            `source ${url}: ${reason}`,
+            "remove it — a passage that traced here was never backed by a document",
+          ),
+        );
+      }
+    }
+  }
+
+  const manifestPath = join(dir, "sources.json");
+  if (!existsSync(manifestPath)) return findings;
+
+  let manifest: Array<{ requested?: unknown; url?: unknown }>;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as typeof manifest;
+  } catch (error) {
+    findings.push(
+      finding(
+        "error",
+        "corpus.source-manifest-broken",
+        `domains/${domain.id}/sources.json`,
+        `could not be read: ${(error as Error).message}`,
+        "rebuild the Domain so the manifest records what was actually fetched",
+      ),
+    );
+    return findings;
+  }
+
+  for (const entry of manifest) {
+    if (typeof entry.url !== "string" || typeof entry.requested !== "string") continue;
+    const reason = unusableSourceReason(entry.url);
+    if (reason !== undefined) {
+      findings.push(
+        finding(
+          "error",
+          "corpus.source-unusable",
+          `domains/${domain.id}/sources.json`,
+          `fetched ${entry.url}: ${reason}`,
+          "refetch the intended document, or drop the source if no passage traces to it",
+        ),
+      );
+      continue;
+    }
+    let requested: URL;
+    let resolved: URL;
+    try {
+      requested = new URL(entry.requested);
+      resolved = new URL(entry.url);
+    } catch {
+      continue;
+    }
+    if (requested.host !== resolved.host) {
+      findings.push(
+        finding(
+          "warning",
+          "corpus.source-redirected",
+          `domains/${domain.id}/sources.json`,
+          `${entry.requested} resolved to ${entry.url} — a different host than the one asked for`,
+          "cite the document actually used, or explain the redirect in the review",
+        ),
+      );
+    }
   }
 
   return findings;
@@ -313,7 +405,11 @@ function validateChecks(domain: Domain): Finding[] {
 
 // ---------------------------------------------------------------- domain rules
 
-function validateDomain(domain: Domain, dir: string): Finding[] {
+function validateDomain(
+  domain: Domain,
+  dir: string,
+  listedDomainIds: ReadonlySet<string> | undefined,
+): Finding[] {
   const findings: Finding[] = [
     ...validateCorpus(domain, dir),
     ...validateGlossary(domain),
@@ -333,6 +429,148 @@ function validateDomain(domain: Domain, dir: string): Finding[] {
         "name the person accountable for this material",
       ),
     );
+  }
+
+  // ADR 0012: a Domain no Profession lists is coverage the entry page cannot
+  // show. A warning, not an error — the Domain still teaches — but coverage
+  // that decays quietly is the failure mode the catalogue exists to prevent.
+  if (listedDomainIds !== undefined && !listedDomainIds.has(domain.id)) {
+    findings.push(
+      finding(
+        "warning",
+        "domain.unlisted",
+        where,
+        "no Profession lists this Domain, so the entry page cannot offer it",
+        "add its id to a Profession's `domains` in professions/professions.md",
+      ),
+    );
+  }
+
+  return findings;
+}
+
+/** The source URLs a Domain recorded — its manifest, or the ones in its meta. */
+function domainSourceUrls(domain: Domain, dir: string): Set<string> {
+  const urls = new Set<string>();
+  const manifestPath = join(dir, "sources.json");
+  if (existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Array<{
+        url?: unknown;
+      }>;
+      for (const entry of manifest) {
+        if (typeof entry.url === "string") urls.add(entry.url);
+      }
+      return urls;
+    } catch {
+      // An unreadable manifest is reported by its own rule; it must not
+      // manufacture an overlap finding on top of it.
+      return urls;
+    }
+  }
+  for (const source of domain.sources) {
+    for (const url of source.match(/https?:\/\/[^\s]+/g) ?? []) urls.add(url);
+  }
+  return urls;
+}
+
+/**
+ * Near-duplicate Domains, named (ADR 0012).
+ *
+ * The same rule a signature may sweep drafts with (ADR 0010): at least two
+ * shared sources AND 60% of the smaller set. This only NAMES the overlap —
+ * signed Domains are a person's decision, so the validator refuses to delete
+ * anything here and asks the owner to merge or justify.
+ */
+function validateDomainOverlap(
+  domains: Array<{ domain: Domain; dir: string; urls: Set<string> }>,
+): Finding[] {
+  const findings: Finding[] = [];
+  for (let i = 0; i < domains.length; i++) {
+    for (let j = i + 1; j < domains.length; j++) {
+      const mine = domains[i];
+      const theirs = domains[j];
+      const shared = [...mine.urls].filter((url) => theirs.urls.has(url)).length;
+      const smaller = Math.min(mine.urls.size, theirs.urls.size);
+      if (smaller === 0 || shared < 2 || shared / smaller < 0.6) continue;
+      findings.push(
+        finding(
+          "warning",
+          "domain.overlap",
+          `domains/${mine.domain.id}/meta.md`,
+          `shares ${shared} of ${smaller} sources with \`${theirs.domain.id}\` — near-duplicate Domains teach the same thing twice`,
+          `merge them under one owner, or justify keeping both`,
+        ),
+      );
+    }
+  }
+  return findings;
+}
+
+/**
+ * The industry catalogue's own rules (ADR 0012).
+ *
+ * Two of them carry the platform's promises. `profession.high-risk-open`
+ * extends ADR 0004 — no actor verifies its own output — to signing itself:
+ * a high-risk Profession may not list Domains while every Domain records a
+ * single reviewer, so the door stays closed until two-reviewer signing exists.
+ * And `profession.unknown-domain` keeps the entry honest: a Profession may
+ * only claim Domains that are actually signed.
+ */
+function validateProfessions(
+  index: ProfessionIndex,
+  domainIds: ReadonlySet<string>,
+): Finding[] {
+  const findings: Finding[] = [];
+
+  for (const profession of index.professions.values()) {
+    const where = `professions/professions.md#${profession.id}`;
+    if (profession.boundary.trim() === "") {
+      findings.push(
+        finding(
+          "error",
+          "profession.missing-boundary",
+          where,
+          "no boundary — the learner cannot see what this industry will NOT be taught",
+          "write the `boundary` line; it is the honesty the entry page shows",
+        ),
+      );
+    }
+    if (!index.categories.has(profession.categoryId)) {
+      findings.push(
+        finding(
+          "error",
+          "profession.unknown-category",
+          where,
+          `category ${JSON.stringify(profession.categoryId)} is not a category in this file`,
+          "use a category id declared with kind: category",
+        ),
+      );
+    }
+    for (const domainId of profession.domainIds) {
+      if (!domainIds.has(domainId)) {
+        findings.push(
+          finding(
+            "error",
+            "profession.unknown-domain",
+            where,
+            `Domain ${JSON.stringify(domainId)} is not signed — a draft is not coverage`,
+            "sign the Domain first, or take it off the list",
+          ),
+        );
+      }
+    }
+    if (profession.risk === "high" && profession.domainIds.length > 0) {
+      findings.push(
+        finding(
+          "error",
+          "profession.high-risk-open",
+          where,
+          "a high-risk Profession lists Domains, but no Domain can yet record the two independent reviewers ADR 0012 requires",
+          "empty its `domains` list until two-reviewer signing exists — the door stays closed",
+        ),
+      );
+    }
   }
 
   return findings;
@@ -363,6 +601,8 @@ export interface ValidateOptions {
   personasDir?: string;
   stylesDir?: string;
   domainsDir?: string;
+  /** Defaults to the repo's industry catalogue (ADR 0012). */
+  professionsFile?: string;
 }
 
 /**
@@ -406,6 +646,7 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
   const personasDir = options.personasDir ?? PERSONAS_DIR;
   const stylesDir = options.stylesDir ?? STYLES_DIR;
   const domainsDir = options.domainsDir ?? DOMAINS_DIR;
+  const professionsFile = options.professionsFile ?? PROFESSIONS_FILE;
 
   const findings: Finding[] = [];
 
@@ -423,11 +664,42 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
     if (loaded.problem !== undefined) findings.push(loaded.problem);
   }
 
-  for (const dir of domainDirs(domainsDir)) {
+  const loadedDomains: Array<{ domain: Domain; dir: string; urls: Set<string> }> = [];
+  const domainIds = new Set<string>();
+  const domainDirsList = domainDirs(domainsDir);
+  for (const dir of domainDirsList) {
+    domainIds.add(dir.slice(domainsDir.length + 1));
     const loaded = safely(dir, () => loadDomain(dir));
-    if (loaded.value !== undefined) findings.push(...validateDomain(loaded.value, dir));
-    if (loaded.problem !== undefined) findings.push(loaded.problem);
+    if (loaded.value === undefined) {
+      if (loaded.problem !== undefined) findings.push(loaded.problem);
+      continue;
+    }
+    loadedDomains.push({ domain: loaded.value, dir, urls: domainSourceUrls(loaded.value, dir) });
   }
+
+  const professions = safely(professionsFile, () => loadProfessions(professionsFile));
+  if (professions.value === undefined && professions.problem !== undefined) {
+    findings.push(professions.problem);
+  }
+  // A Domain's rules run whether or not the industry catalogue loads: a
+  // broken catalogue must not silence every corpus, glossary and check
+  // rule, which is what putting them behind the catalogue's `else`
+  // branch would do.
+  const listed =
+    professions.value === undefined
+      ? undefined
+      : new Set(
+          [...professions.value.professions.values()].flatMap((profession) => profession.domainIds),
+        );
+  for (const { domain, dir } of loadedDomains) {
+    findings.push(...validateDomain(domain, dir, listed));
+  }
+
+  if (professions.value !== undefined) {
+    findings.push(...validateProfessions(professions.value, domainIds));
+  }
+
+  findings.push(...validateDomainOverlap(loadedDomains));
 
   findings.push(...validateChoice("persona", personaPaths.length, "library/personas/"));
   findings.push(...validateChoice("style", stylePaths.length, "library/styles/"));
@@ -447,7 +719,7 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
 export function validateDraft(dir: string): ValidationReport {
   const findings: Finding[] = [];
   const loaded = safely(dir, () => loadDomain(dir));
-  if (loaded.value !== undefined) findings.push(...validateDomain(loaded.value, dir));
+  if (loaded.value !== undefined) findings.push(...validateDomain(loaded.value, dir, undefined));
   if (loaded.problem !== undefined) findings.push(loaded.problem);
 
   const errors = findings.filter((f) => f.severity === "error").length;

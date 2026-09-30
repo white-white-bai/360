@@ -19,6 +19,14 @@ export const STYLES_DIR = join(LIBRARY_DIR, "styles");
 export const DOMAINS_DIR = join(REPO_ROOT, "domains");
 
 /**
+ * The industry catalogue (ADR 0012): categories and Professions in one file,
+ * in the section grammar every other knowledge asset uses. The file's length
+ * is the honest statement of what the platform can say about an industry —
+ * categories are seeded in full, Professions only where something can be taught.
+ */
+export const PROFESSIONS_FILE = join(REPO_ROOT, "professions", "professions.md");
+
+/**
  * Domains the builder wrote and nobody has signed yet (ADR 0010).
  *
  * Outside `domains/` on purpose: the library loads everything it finds there, and a draft that

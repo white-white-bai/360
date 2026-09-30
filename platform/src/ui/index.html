@@ -142,6 +142,8 @@
   }
   #setup .catalogue { margin: 0; color: var(--dim); font-size: 12px; }
   #setup .catalogue a { color: var(--chalk); text-decoration: underline dotted; cursor: pointer; }
+  #setup .catalogue .cat { color: var(--accent); cursor: default; text-decoration: none; }
+  #setup .catalogue .closed { color: var(--dim); cursor: not-allowed; text-decoration: none; }
   #setup .sweep { display: block; margin-top: 6px; color: var(--chalk); }
 
   /* The review view (ADR 0010): the material a signature accepts, shown before the name. */
@@ -249,6 +251,7 @@
       <span class="field-label">学什么</span>
       <div class="field-body">
         <input id="pick-topic" type="text" autocomplete="off" placeholder="输入主题：已有的直接上课；没有的，现做一份" />
+        <p class="catalogue">行业：<span id="professions"></span></p>
         <p class="catalogue">已有教材：<span id="catalogue"></span></p>
         <p class="catalogue" id="draft-line" hidden>待签字：<span id="drafts"></span></p>
       </div>
@@ -463,6 +466,7 @@ const sweepList = document.getElementById("sweep-list");
 const sweepBox = document.getElementById("review-sweep");
 const topicInput = document.getElementById("pick-topic");
 const catalogueLine = document.getElementById("catalogue");
+const professionsLine = document.getElementById("professions");
 const draftLine = document.getElementById("draft-line");
 const draftsLine = document.getElementById("drafts");
 const stylePick = document.getElementById("pick-style");
@@ -780,6 +784,55 @@ function fill(select, entries) {
 /** Build the entry panel from one `/options` snapshot. Re-runnable: a signature changes it. */
 function applyOptions(options) {
   offered = options;
+
+  // The industry door (ADR 0012): categories in full, each Profession
+  // carrying its computed status. Open starts its first Domain, planned
+  // types the profession into the topic box (the builder's door), closed
+  // is inert and says why — the refusal is the product decision, not a
+  // disclaimer on a lesson that should not exist.
+  professionsLine.replaceChildren();
+  if (options.professions.length === 0) {
+    professionsLine.hidden = true;
+  } else {
+    professionsLine.hidden = false;
+    const byCategory = new Map();
+    for (const profession of options.professions) {
+      const group = byCategory.get(profession.category) ?? [];
+      group.push(profession);
+      byCategory.set(profession.category, group);
+    }
+    for (const [categoryId, group] of byCategory) {
+      professionsLine.append(
+        element("span", "cat", group[0] === undefined ? categoryId : group[0].categoryLabel),
+        document.createTextNode("　"),
+      );
+      for (const profession of group) {
+        const chip = document.createElement("a");
+        chip.href = "#";
+        const statusText =
+          profession.status === "open" ? "可学" : profession.status === "planned" ? "待建" : "未开放";
+        chip.textContent = `${profession.label}（${statusText}）`;
+        chip.title = profession.detail;
+        if (profession.status === "open") {
+          const first = profession.domainIds
+            .map((id) => options.domains.find((domain) => domain.id === id))
+            .find((domain) => domain !== undefined);
+          chip.addEventListener("click", (event) => {
+            event.preventDefault();
+            if (first !== undefined) topicInput.value = first.label;
+          });
+        } else if (profession.status === "planned") {
+          chip.addEventListener("click", (event) => {
+            event.preventDefault();
+            topicInput.value = profession.label;
+          });
+        } else {
+          chip.className = "closed";
+        }
+        professionsLine.append(chip, document.createTextNode("　"));
+      }
+    }
+  }
 
   // The Catalogue stays visible under the input: its length is the honest statement of what can
   // be taught, and clicking a name is the same as typing it.

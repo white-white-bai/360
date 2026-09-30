@@ -25,6 +25,28 @@ export type Fetcher = (url: string) => Promise<FetchedDocument>;
 /** A source that cannot be used, with the reason — never a silent skip. */
 export class FetchRefused extends Error {}
 
+/**
+ * A URL that cannot be a source, named before any bytes are read.
+ *
+ * A fetched "document" that is really an error page is worse than a failed
+ * fetch: it enters `sources.json` as if it were authority, and the review
+ * step has to notice the difference by eye. The fetcher refuses it here,
+ * and the validator re-checks what is already on disk.
+ */
+const UNUSABLE_PATH = /unavailable|access-denied|accessdenied|blocked|captcha/i;
+
+export function unusableSourceReason(url: string): string | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return "not a URL";
+  }
+  return UNUSABLE_PATH.test(parsed.pathname)
+    ? `the URL names an error page (${parsed.pathname}), not a document`
+    : undefined;
+}
+
 const DEFAULT_TIMEOUT_MS = 20_000;
 const DEFAULT_MAX_BYTES = 2_000_000;
 const USER_AGENT = "agent-teaching-platform domain-builder";
@@ -92,6 +114,18 @@ export function httpFetcher(options: FetchOptions = {}): Fetcher {
     const mediaType = (response.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
     if (!(mediaType.startsWith("text/") || mediaType === "application/xml" || mediaType === "application/json")) {
       throw new FetchRefused(`${requested} is ${mediaType || "of unknown type"}; the builder reads text`);
+    }
+
+    // A redirect that lands on an error page is a refused source, not a
+    // document that happens to be short: the build fails here, where the
+    // reason is the network's, rather than at review, where it would be
+    // a person's job to notice. A Response built without a URL (tests,
+    // some proxies) has nothing to check — the request URL was clean.
+    if (response.url !== "") {
+      const unusable = unusableSourceReason(response.url);
+      if (unusable !== undefined) {
+        throw new FetchRefused(`${requested} resolved to ${response.url}: ${unusable}`);
+      }
     }
 
     const reader = response.body?.getReader();
