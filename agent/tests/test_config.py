@@ -33,3 +33,24 @@ def test_the_openai_alias_is_accepted_like_the_platform_does() -> None:
     config = config_from_env({"OPENAI_API_KEY": "k", "ATP_MODEL": "m"})
     assert config is not None
     assert config.api_key == "k"
+
+
+def test_zdr_is_a_switch_that_does_not_ride_on_typos() -> None:
+    on = config_from_env({"ATP_API_KEY": "k", "ATP_MODEL": "m", "ATP_ZDR": "1"})
+    assert on is not None and on.zdr is True
+    typed = config_from_env({"ATP_API_KEY": "k", "ATP_MODEL": "m", "ATP_ZDR": "please"})
+    assert typed is not None and typed.zdr is False, "a flag has a meaningful default; a typo is off"
+    default = config_from_env({"ATP_API_KEY": "k", "ATP_MODEL": "m"})
+    assert default is not None and default.zdr is False
+
+
+def test_the_zdr_header_rides_with_auth_when_on() -> None:
+    config = config_from_env({"ATP_API_KEY": "k", "ATP_MODEL": "m", "ATP_ZDR": "true"})
+    assert config is not None
+    headers = config.auth_headers()
+    assert headers["authorization"] == "Bearer k"
+    assert headers["x-cmd-zdr"] == "1"
+
+    plain = config_from_env({"ATP_API_KEY": "k", "ATP_MODEL": "m"})
+    assert plain is not None
+    assert "x-cmd-zdr" not in plain.auth_headers()

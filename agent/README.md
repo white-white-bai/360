@@ -48,3 +48,19 @@ docker compose config            # validate the compose file alone, no daemon ne
 - **The verification boundary is not a Python feature.** ADR 0004's rule — no actor verifies its
   own output — is a rule of the graph (stage 2): the verifier is a separate node, retrieval
   results carry provenance, and signing stays a human act (no MCP tool for it).
+
+## Provider
+
+Same variables as the platform (`ATP_API_KEY` / `ATP_MODEL` / `ATP_BASE_URL` / `ATP_ZDR`), and
+the same current target — Command Code's Provider API:
+
+```bash
+ATP_BASE_URL=https://api.commandcode.ai/provider/v1
+ATP_MODEL=deepseek/deepseek-v4-flash
+ATP_API_KEY=<the Command Code key>
+ATP_ZDR=1                    # optional: zero retention, or fail (422) — never a silent fallback
+```
+
+Two things this provider does not give the later stages: **no embeddings endpoint** (stage 1's
+RAG needs another source or the local fallback), and **Claude models answer on `/messages`
+only** — that is the platform's Anthropic adapter's job, not this service's.

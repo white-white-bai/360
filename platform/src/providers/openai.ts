@@ -1,6 +1,6 @@
 import type { Completion, CompletionRequest, ModelProvider, StreamEvent, Usage } from "./types.ts";
 import { setPrice } from "./pricing.ts";
-import { envNumber, envValue } from "./env.ts";
+import { envFlag, envNumber, envValue } from "./env.ts";
 import { estimateTokens } from "../util/tokens.ts";
 
 /**
@@ -22,6 +22,14 @@ export interface OpenAiCompatibleConfig {
   timeoutMs?: number;
   /** Optional, per million tokens, so the ledger reports money instead of tokens. */
   pricePerMTok?: { input: number; output: number };
+  /**
+   * Zero data retention (Command Code's provider, and anyone else who takes `x-cmd-zdr: 1`).
+   *
+   * On, every request must route through a ZDR-capable upstream or FAIL — which is the point:
+   * a learner's words are the sensitive material ADR 0002 already named, and a silent fallback
+   * to a retaining provider would be exactly the lie the header exists to prevent.
+   */
+  zdr?: boolean;
 }
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
@@ -53,7 +61,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): OpenAiCompa
   if (missing.length > 0) {
     throw new MissingProviderConfig(
       `cannot start a live provider: ${missing.join(" and ")} ${missing.length === 1 ? "is" : "are"} not set. ` +
-        "Also optional: ATP_BASE_URL, ATP_MAX_TOKENS, ATP_TIMEOUT_MS, ATP_PRICE_IN, ATP_PRICE_OUT.",
+        "Also optional: ATP_BASE_URL, ATP_MAX_TOKENS, ATP_TIMEOUT_MS, ATP_PRICE_IN, ATP_PRICE_OUT, ATP_ZDR.",
     );
   }
 
@@ -69,6 +77,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): OpenAiCompa
     maxTokens: envNumber(env, "ATP_MAX_TOKENS"),
     timeoutMs: envNumber(env, "ATP_TIMEOUT_MS") ?? DEFAULT_TIMEOUT_MS,
     pricePerMTok,
+    zdr: envFlag(env, "ATP_ZDR"),
   };
 }
 
@@ -117,6 +126,15 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     return `${this.#config.baseUrl.replace(/\/+$/, "")}/chat/completions`;
   }
 
+  /** The headers every request shares; the ZDR opt-in rides along when it is on. */
+  #headers(): Record<string, string> {
+    return {
+      "content-type": "application/json",
+      authorization: `Bearer ${this.#config.apiKey}`,
+      ...(this.#config.zdr === true ? { "x-cmd-zdr": "1" } : {}),
+    };
+  }
+
   async complete(req: CompletionRequest): Promise<Completion> {
     const messages = [
       ...(req.system === undefined ? [] : [{ role: "system", content: req.system }]),
@@ -127,10 +145,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     try {
       response = await fetch(this.endpoint, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.#config.apiKey}`,
-        },
+        headers: this.#headers(),
         body: JSON.stringify({
           model: this.#config.model,
           messages,
@@ -217,10 +232,7 @@ export class OpenAiCompatibleProvider implements ModelProvider {
     try {
       response = await fetch(this.endpoint, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.#config.apiKey}`,
-        },
+        headers: this.#headers(),
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(this.#config.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       });

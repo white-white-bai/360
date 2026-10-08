@@ -25,7 +25,7 @@ def probe_chat(client: httpx.Client, config: Config) -> bool:
     try:
         response = client.post(
             config.chat_url,
-            headers={"authorization": f"Bearer {config.api_key}"},
+            headers={**config.auth_headers(), "content-type": "application/json"},
             json={
                 "model": config.model,
                 "messages": [{"role": "user", "content": "回答一个字：好"}],
@@ -53,7 +53,7 @@ def probe_embeddings(client: httpx.Client, config: Config) -> bool:
     try:
         response = client.post(
             config.embeddings_url,
-            headers={"authorization": f"Bearer {config.api_key}"},
+            headers={**config.auth_headers(), "content-type": "application/json"},
             json={"model": config.embed_model, "input": "好"},
         )
     except httpx.RequestError as error:
@@ -147,6 +147,10 @@ def main() -> int:
     print(f"chat      {config.model}")
     print(f"embed     {config.embed_model}")
     print(f"key       {len(config.api_key)} chars (the key itself is never printed)")
+    print(
+        "zdr       "
+        + ("on — must route through a zero-data-retention upstream, or fail" if config.zdr else "off")
+    )
 
     ok = True
     with httpx.Client(timeout=30) as client:

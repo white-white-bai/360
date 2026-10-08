@@ -15,6 +15,17 @@ from typing import Mapping
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 
+_FLAG_ON = {"1", "true", "yes", "on"}
+
+
+def env_flag(env: Mapping[str, str], name: str) -> bool:
+    """A switch. `1`/`true`/`yes`/`on` — any case — mean on; anything else means off.
+
+    Unlike a number, a flag has a meaningful default, so a typo is not worth failing the
+    process over; and unlike the TypeScript side, this returns a plain bool.
+    """
+    return (env.get(name) or "").strip().lower() in _FLAG_ON
+
 
 @dataclass(frozen=True)
 class Config:
@@ -22,6 +33,7 @@ class Config:
     model: str
     base_url: str
     embed_model: str
+    zdr: bool
 
     @property
     def chat_url(self) -> str:
@@ -34,6 +46,13 @@ class Config:
     def describe(self) -> str:
         """What is safe to print: the endpoint, the models, and the key's LENGTH."""
         return f"{self.model} at {self.base_url} · key {len(self.api_key)} chars"
+
+    def auth_headers(self) -> dict[str, str]:
+        """The headers every request shares; the ZDR opt-in rides along when it is on."""
+        headers = {"authorization": f"Bearer {self.api_key}"}
+        if self.zdr:
+            headers["x-cmd-zdr"] = "1"
+        return headers
 
 
 def config_from_env(env: Mapping[str, str] | None = None) -> Config | None:
@@ -49,4 +68,10 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config | None:
         return None
     base_url = (source.get("ATP_BASE_URL") or "").strip().rstrip("/") or DEFAULT_BASE_URL
     embed_model = (source.get("ATP_EMBED_MODEL") or "").strip() or DEFAULT_EMBED_MODEL
-    return Config(api_key=api_key, model=model, base_url=base_url, embed_model=embed_model)
+    return Config(
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+        embed_model=embed_model,
+        zdr=env_flag(source, "ATP_ZDR"),
+    )

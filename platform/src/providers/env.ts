@@ -23,3 +23,13 @@ export function envNumber(env: NodeJS.ProcessEnv, name: string): number | undefi
   }
   return parsed;
 }
+
+/**
+ * A switch. `1`, `true`, `yes`, `on` — any case — mean on; anything else, including a typo,
+ * means off. Unlike a number, a flag has a meaningful default, so an unreadable value is not
+ * worth failing a session over.
+ */
+export function envFlag(env: NodeJS.ProcessEnv, name: string): boolean {
+  const raw = envValue(env, name)?.toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}

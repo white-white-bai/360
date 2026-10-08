@@ -21,9 +21,9 @@ async function main(): Promise<void> {
       // wondering whether the key itself is wrong.
       const hint = staleEnvHint(storedUserEnv(["ATP_API_KEY", "ATP_MODEL"]), process.env);
       if (hint !== null) console.error(`${hint}\n`);
-      console.error("Example (OpenAI-compatible, so any of OpenAI / DeepSeek / Qwen / vLLM / Ollama):");
-      console.error('  set ATP_BASE_URL=https://api.deepseek.com/v1');
-      console.error("  set ATP_MODEL=deepseek-chat");
+      console.error("Example (OpenAI-compatible, so any of OpenAI / DeepSeek / Qwen / Command Code / vLLM / Ollama):");
+      console.error("  set ATP_BASE_URL=https://api.commandcode.ai/provider/v1");
+      console.error("  set ATP_MODEL=deepseek/deepseek-v4-flash");
       console.error("  set ATP_API_KEY=...");
       process.exitCode = 1;
       return;
@@ -42,6 +42,13 @@ async function main(): Promise<void> {
       config.pricePerMTok === undefined
         ? "not set — the ledger will use the placeholder table, so treat any cost figure as a guess"
         : `$${config.pricePerMTok.input}/M in, $${config.pricePerMTok.output}/M out`
+    }`,
+  );
+  console.log(
+    `  zdr      : ${
+      config.zdr === true
+        ? "on — the request must route through a zero-data-retention upstream, or it fails"
+        : "off"
     }`,
   );
 

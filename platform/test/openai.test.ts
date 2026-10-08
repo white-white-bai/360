@@ -14,7 +14,7 @@ interface WireBody {
 
 interface Stub {
   url: string;
-  received: Array<{ authorization?: string; contentType?: string; body: WireBody }>;
+  received: Array<{ authorization?: string; contentType?: string; zdr?: string; body: WireBody }>;
   close(): Promise<void>;
 }
 
@@ -39,6 +39,7 @@ async function startStub(reply: (body: WireBody) => { status: number; text: stri
       received.push({
         authorization: request.headers.authorization,
         contentType: request.headers["content-type"],
+        zdr: request.headers["x-cmd-zdr"] as string | undefined,
         body,
       });
       const { status, text } = reply(body);
@@ -90,6 +91,29 @@ test("a request without a system prompt sends only the user message", async (t) 
 
   await provider.complete({ actor: "a", model: "m", input: "USR" });
   assert.deepEqual(stub.received[0]?.body.messages, [{ role: "user", content: "USR" }]);
+});
+
+test("the ZDR opt-in is a header, and only when asked for", async (t) => {
+  const stub = await startStub(() => ({ status: 200, text: OK_REPLY }));
+  t.after(() => stub.close());
+
+  const plain = new OpenAiCompatibleProvider({ baseUrl: stub.url, apiKey: "k", model: "m" });
+  await plain.complete({ actor: "a", model: "m", input: "hi" });
+  assert.equal(stub.received[0]?.zdr, undefined, "silence is the default: no header unless asked");
+
+  // Zero retention has to be a property of every request, not a setting someone remembered —
+  // a learner's words are the sensitive material ADR 0002 already named.
+  const zdr = new OpenAiCompatibleProvider({ baseUrl: stub.url, apiKey: "k", model: "m", zdr: true });
+  await zdr.complete({ actor: "a", model: "m", input: "hi" });
+  assert.equal(stub.received[1]?.zdr, "1");
+});
+
+test("the ZDR switch is read from the environment, and a typo is off", () => {
+  const base = { ATP_API_KEY: "k", ATP_MODEL: "m" };
+  assert.equal(configFromEnv({ ...base, ATP_ZDR: "1" }).zdr, true);
+  assert.equal(configFromEnv({ ...base, ATP_ZDR: "true" }).zdr, true);
+  assert.equal(configFromEnv({ ...base, ATP_ZDR: "please" }).zdr, false);
+  assert.equal(configFromEnv(base).zdr, false);
 });
 
 test("reported usage is used as reported", async (t) => {

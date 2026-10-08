@@ -41,13 +41,16 @@ npm test                                  # 250+ 个测试（node --test，无�
 npm run typecheck
 ```
 
-**环境**（Node ≥ 22.6，无依赖，type-stripping 直接跑）：
+**环境**（Node ≥ 22.6，无依赖，type-stripping 直接跑）。本项目当前接入的是 Command Code Provider API（OpenAI/Anthropic 双兼容）：
 
 ```bash
-export ATP_API_KEY=...    # Windows: setx ATP_API_KEY ...（之后开的终端才带得上）
-export ATP_MODEL=...      # 模型名
-export ATP_BASE_URL=...   # 可选，默认 https://api.openai.com/v1
+export ATP_API_KEY=...        # Command Code 的 API key（Studio → API keys；和 CLI 同一个 key）
+export ATP_MODEL=...          # 目录里的模型 id，如 deepseek/deepseek-v4-flash
+export ATP_BASE_URL=https://api.commandcode.ai/provider/v1
+export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；模型没有 ZDR 上游时请求 422 失败，而不是降级
 ```
+
+几条边界，免得撞上：**Claude 模型只在 `/messages` 上应答**（走 `/chat/completions` 会 400），改用 `ATP_ANTHROPIC_MODEL` / `ATP_ANTHROPIC_API_KEY` / `ATP_ANTHROPIC_BASE_URL`（同样指向 `https://api.commandcode.ai/provider/v1`）；**Go 套餐没有 API 权限**（403 `upgrade_required`，401 才是 key 不对）；该提供商的端点里**没有 embeddings**，所以 RAG 阶段（Stage 1）要另找 embedding 源或走本地兜底。模型目录可直接看 `GET /provider/v1/models`（每个模型带 `supported_endpoints`）。
 
 没有配置 provider 时：网页玩录播回放（只有一节：时间戳、时区与夏令时），直接课堂被锁——它的每句话都来自模型。
 
