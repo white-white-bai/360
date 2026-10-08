@@ -77,6 +77,67 @@ def test_grounded_turn_searches_answers_and_is_verified_by_another_actor() -> No
     assert model.seen[1]["messages"][-1]["role"] == "tool", "the search result reached the teacher"
     assert json.loads(model.seen[1]["messages"][-1]["content"])["hits"][0]["url"].startswith("https://")
     assert {row.actor for row in model.ledger.rows()} == {"lead-explainer", "verifier"}, "both actors cost money"
+    assert final["challenge"] == "", "no misconception catalogue behind this one, so no challenger"
+
+
+def test_an_unknown_citation_is_caught_by_the_kernel_not_by_the_verifier() -> None:
+    model = ScriptedModel(
+        [
+            search_call(),
+            # The live eval caught this shape: the model cited a REAL passage (it exists in
+            # another Domain) that this run's search had not returned. A citation nobody was
+            # given is a citation nobody can check — refused the same way a fabricated one is.
+            ModelReply("工具描述不可以直接信任 [P-tool-annotations-untrusted]。"),
+            ModelReply("工具描述不可以直接信任 [P-gap-and-overlap]。"),
+            verdict(True),
+        ]
+    )
+    agent = build_graph(model, toolbox(), max_steps=4)
+    final = agent.invoke(fresh_turn("MCP 的工具描述可以直接信任吗", "grounded"))
+
+    assert final["revised"] is True
+    assert final["verified"] is True
+    actors = [seen["actor"] for seen in model.seen]
+    assert actors == ["lead-explainer", "lead-explainer", "lead-explainer", "verifier"], (
+        "search, the bad answer, the revision — and the verifier was asked exactly once, about the good one"
+    )
+    revision = json.dumps(model.seen[2]["messages"], ensure_ascii=False)
+    assert "P-tool-annotations-untrusted" in revision
+    assert "可用的段落 id" in revision and "P-gap-and-overlap" in revision
+
+
+def test_unknown_citations_ignores_ids_that_were_actually_retrieved() -> None:
+    from agent.graph.nodes import unknown_citations
+
+    hits = [{"id": "P-gap-and-overlap"}]
+    assert unknown_citations("见 [P-gap-and-overlap] 与 [P-invented]", hits) == ["P-invented"]
+    assert unknown_citations("没有任何引用", hits) == []
+
+
+def test_the_challenger_names_and_refutes_a_catalogued_misconception(tmp_path: Path) -> None:
+    domain = tmp_path / "time-zones"
+    domain.mkdir()
+    (domain / "meta.md").write_text("id: time-zones\nname: 时区\n", encoding="utf-8")
+    (domain / "corpus.md").write_text(
+        "## P-gap-and-overlap\nsource: RFC 9557 §1.2 — https://example.test/rfc\n> Gap text.\n",
+        encoding="utf-8",
+    )
+    (domain / "misconceptions.md").write_text("## M-1\nname: 缺口就是时间变少了\n", encoding="utf-8")
+
+    model = ScriptedModel(
+        [
+            search_call(),
+            ModelReply("缺口是时钟前拨时被跳过的本地时刻。[P-gap-and-overlap]"),
+            verdict(True),
+            ModelReply("你把缺口理解成「时间变少了」——变少的不是时间，是没有任何钟面读数对应的那些时刻。"),
+        ]
+    )
+    agent = build_graph(model, Toolbox(retriever=StubRetriever([hit()]), domains_dir=tmp_path), max_steps=4)
+    final = agent.invoke(fresh_turn("时区为什么有缺口", "grounded"))
+
+    assert final["challenge"].startswith("你把缺口")
+    assert model.seen[-1]["actor"] == "challenger"
+    assert "M-1" in model.seen[-1]["messages"][-1]["content"], "the misconceptions catalogue was the target list"
 
 
 def test_an_unsupported_claim_gets_one_revision_and_then_the_verdict_stands() -> None:

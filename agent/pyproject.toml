@@ -23,6 +23,10 @@ dependencies = [
   # and the ledger, and those are not decoration.
   "langgraph>=0.2",
   "langgraph-checkpoint-sqlite>=2",
+  # Stage 3 (MCP): the same tools this service runs, offered to any agent that speaks the
+  # protocol. Signing is deliberately not among them — it is a human act, and a protocol that
+  # could call it would be a protocol that could sign.
+  "fastmcp>=2",
 ]
 
 [project.optional-dependencies]
@@ -30,7 +34,7 @@ dependencies = [
 # langchain-openai in stage 2, faiss-cpu and rank-bm25 in stage 1, fastmcp in stage 3,
 # opentelemetry and gradio in stage 4. A dependency nothing runs yet is a dependency nobody
 # understands.
-dev = ["pytest>=8.2"]
+dev = ["pytest>=8.2", "pytest-asyncio>=0.24"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent"]
@@ -38,3 +42,4 @@ packages = ["src/agent"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+asyncio_mode = "auto"

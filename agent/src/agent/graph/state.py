@@ -22,3 +22,4 @@ class AgentState(TypedDict, total=False):
     verified: bool | None  # None = nobody judged (chat mode, or nothing to judge)
     verify_note: str  # why no verdict exists, when that is the honest state
     hits: list[dict[str, Any]]  # retrieved passages with provenance, for the verifier
+    challenge: str  # the Challenger's refutation, when the misconceptions catalogue had a target

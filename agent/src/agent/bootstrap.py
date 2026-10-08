@@ -1,0 +1,48 @@
+"""One place that assembles the live stack.
+
+The terminal door and the eval harness must not drift in how they build the agent: a diff
+between them would show up as "the eval passes but the CLI fails", which reads as a mystery and
+is not one.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+from langgraph.checkpoint.sqlite import SqliteSaver
+
+from .app import domains_dir
+from .config import Config, config_from_env
+from .ledger import Ledger
+from .model import ProviderModel
+from .rag.assets import load_passages
+from .rag.embed import embedder_from_env
+from .rag.store import Retriever
+from .tools import Toolbox
+
+STATE_DIR = Path(__file__).resolve().parents[2] / ".state"
+
+
+class NoProvider(RuntimeError):
+    """Nothing is configured to think with — the honest state, not a crash to debug."""
+
+
+def live_stack(*, rerank: bool = True) -> tuple[Config, Ledger, ProviderModel, Toolbox]:
+    """Provider, ledger, model and tools, built the one way."""
+    config = config_from_env()
+    if config is None:
+        raise NoProvider("没有配置 provider（ATP_API_KEY / ATP_MODEL；也可写进仓库根目录的 .env）")
+    ledger = Ledger()
+    model = ProviderModel(config, ledger)
+    retriever = Retriever(load_passages(domains_dir()), embedder_from_env())
+    toolbox = Toolbox(retriever=retriever, domains_dir=domains_dir(), rerank_config=config if rerank else None)
+    return config, ledger, model, toolbox
+
+
+def checkpointer(filename: str = "checkpoints.sqlite") -> SqliteSaver:
+    """The SQLite checkpointer both doors share; agent/.state is gitignored."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    # check_same_thread=False: LangGraph may step the graph from a worker thread, and a session
+    # that dies of a sqlite threading assertion is a session that dies of nothing the learner did.
+    return SqliteSaver(sqlite3.connect(STATE_DIR / filename, check_same_thread=False))

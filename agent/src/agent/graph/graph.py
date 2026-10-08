@@ -13,7 +13,14 @@ from langgraph.graph import END, StateGraph
 
 from ..model import Model
 from ..tools import Toolbox
-from .nodes import make_lead_node, make_tools_node, make_verify_node, route_after_lead, route_after_verify
+from .nodes import (
+    make_challenge_node,
+    make_lead_node,
+    make_tools_node,
+    make_verify_node,
+    route_after_lead,
+    route_after_verify,
+)
 from .state import AgentState
 
 
@@ -23,6 +30,7 @@ def build_graph(model: Model, toolbox: Toolbox, *, max_steps: int = 4, checkpoin
     graph.add_node("lead", make_lead_node(model, toolbox, max_steps=max_steps))
     graph.add_node("tools", make_tools_node(toolbox))
     graph.add_node("verify", make_verify_node(model))
+    graph.add_node("challenge", make_challenge_node(model, toolbox))
 
     graph.set_entry_point("lead")
     graph.add_conditional_edges(
@@ -31,7 +39,10 @@ def build_graph(model: Model, toolbox: Toolbox, *, max_steps: int = 4, checkpoin
         {"tools": "tools", "verify": "verify", "end": END},
     )
     graph.add_edge("tools", "lead")
-    graph.add_conditional_edges("verify", route_after_verify, {"lead": "lead", "end": END})
+    graph.add_conditional_edges(
+        "verify", route_after_verify, {"lead": "lead", "challenge": "challenge", "end": END}
+    )
+    graph.add_edge("challenge", END)
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -49,4 +60,5 @@ def fresh_turn(question: str, mode: str) -> dict:
         "verified": None,
         "verify_note": "",
         "hits": [],
+        "challenge": "",
     }

@@ -12,6 +12,7 @@
     "baseline": "node src/session/run-baseline.ts",
     "apparatus": "node src/session/run-apparatus.ts",
     "validate": "node src/validate/run-validate.ts",
+    "validate-draft": "node src/validate/run-validate-draft.ts",
     "experiment": "node src/experiment/run-experiment.ts",
     "board": "node src/ui/serve.ts",
     "enter": "node src/session/run-entry.ts",

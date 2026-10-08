@@ -8,25 +8,12 @@ check those citations; chat is ADR 0011's direct classroom — no tools, no retr
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
-from pathlib import Path
 
-from langgraph.checkpoint.sqlite import SqliteSaver
-
-from .app import domains_dir
-from .config import config_from_env
+from .bootstrap import NoProvider, checkpointer, live_stack
 from .console import utf8_console
 from .graph.graph import build_graph, fresh_turn
-from .ledger import Ledger
-from .model import ProviderError, ProviderModel
-from .rag.assets import load_passages
-from .rag.embed import embedder_from_env
-from .rag.store import Retriever
-from .tools import Toolbox
-
-# agent/.state — gitignored, and where a resumable thread actually lives.
-STATE_DIR = Path(__file__).resolve().parents[2] / ".state"
+from .model import ProviderError
 
 
 def main() -> int:
@@ -39,23 +26,15 @@ def main() -> int:
     parser.add_argument("--no-rerank", action="store_true", help="keep the fused order for searches")
     args = parser.parse_args()
 
-    config = config_from_env()
-    if config is None:
-        print("没有配置 provider（ATP_API_KEY / ATP_MODEL；也可写进仓库根目录的 .env）。", file=sys.stderr)
+    try:
+        _, ledger, model, toolbox = live_stack(rerank=not args.no_rerank)
+    except NoProvider as error:
+        print(str(error), file=sys.stderr)
         return 1
 
-    ledger = Ledger()
-    model = ProviderModel(config, ledger)
-    retriever = Retriever(load_passages(domains_dir()), embedder_from_env())
-    toolbox = Toolbox(
-        retriever=retriever,
-        domains_dir=domains_dir(),
-        rerank_config=None if args.no_rerank else config,
+    agent = build_graph(
+        model, toolbox, max_steps=args.max_steps, checkpointer=checkpointer()
     )
-
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(STATE_DIR / "checkpoints.sqlite", check_same_thread=False)
-    agent = build_graph(model, toolbox, max_steps=args.max_steps, checkpointer=SqliteSaver(connection))
 
     try:
         final = agent.invoke(fresh_turn(args.question, args.mode), {"configurable": {"thread_id": args.thread}})
@@ -64,6 +43,9 @@ def main() -> int:
         return 1
 
     print(f"\n【主讲】{final.get('answer', '').strip() or '（没有回答）'}")
+
+    if final.get("challenge"):
+        print(f"\n【质疑者】{final['challenge']}")
 
     if args.mode == "grounded":
         verdicts = final.get("verdicts", [])

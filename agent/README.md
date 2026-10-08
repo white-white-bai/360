@@ -11,7 +11,7 @@ built one stage at a time. It shares the knowledge assets with the TypeScript pl
 | Prompt 与 Context | Stage 2 |
 | Vibe Coding | 保持（仓库自身的开发方式） |
 | RAG | Stage 1 ✓（段落级检索：本地多语 embedder + FAISS + BM25 + RRF + LLM 重排；golden hits@K 5/5） |
-| Agent 智能体 | Stage 2 ✓（LangGraph 有界 ReAct 循环，3 个只读工具，独立校验节点，SQLite 检查点，chat/grounded 两种模式） |
+| Agent 智能体 | Stage 2–3 ✓（LangGraph 有界 ReAct，3 个只读工具，独立校验节点，质疑者节点，SQLite 检查点，chat/grounded 两种模式，MCP server） |
 | 开发框架与工具栈 | Stage 0 起陆续落地（FastAPI ✓；LangGraph ✓ Stage 2；fastmcp Stage 3；Gradio/OTel Stage 4） |
 | FineTuning | **未落地**：本机 GPU 是 GT 710，不是推理卡，且无数据无必要 |
 | 多模态与视觉 | **未落地**：PDF/OCR 解析列为后续可选工具 |
@@ -110,3 +110,35 @@ Two things this provider does not give the later stages: **no embeddings endpoin
   into money; without them the row says the price is unknown rather than inventing one.
 - Tools that WRITE are absent on purpose: building arrives gated in a later stage, and signing
   is a human act no tool here will ever expose.
+
+## MCP (stage 3)
+
+```bash
+python -m agent.mcp_server          # stdio transport; usually launched by a client, not by you
+```
+
+Mount it in Command Code (one command, from any terminal):
+
+```powershell
+cmd mcp add teaching -- "D:\all-walks-of-life\agent\.venv\Scripts\python.exe" -m agent.mcp_server
+```
+
+Exposed: `search_corpus`, `list_domains`, `read_domain`, `describe_draft`, `validate_draft`,
+`build_domain`. **Not exposed, deliberately: anything that signs** — ADR 0006/0010 make the
+signature a human act, and a protocol that could call it would be a protocol that signs. The
+validator is the platform's own (`validate-draft`, a thin CLI over the same rule the gate uses);
+a second implementation of one rule is how the two start disagreeing.
+
+## Evals (stage 3)
+
+```bash
+.venv\Scripts\python evals\retrieval.py     # golden queries → hits@K (retrieval alone)
+.venv\Scripts\python evals\grounding.py     # full grounded runs → first-pass approval, honesty, cost
+```
+
+`grounding.py` is the seed of ADR 0001's acceptance measurement: how often the first answer
+survives the verifier, what the revision did, whether a question the corpus cannot answer
+produces honesty instead of a confident sentence, and what each answered question cost. It
+spends real money; it is not a pytest. The first live run found a real failure — the teacher
+cited a real passage that this run's search had not returned, the verifier refused it twice —
+which is why the kernel now checks citations before the verifier is paid to think about them.
