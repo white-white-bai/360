@@ -23,7 +23,7 @@ async function main(): Promise<void> {
       if (hint !== null) console.error(`${hint}\n`);
       console.error("Example (OpenAI-compatible, so any of OpenAI / DeepSeek / Qwen / Command Code / vLLM / Ollama):");
       console.error("  set ATP_BASE_URL=https://api.commandcode.ai/provider/v1");
-      console.error("  set ATP_MODEL=deepseek/deepseek-v4-flash");
+      console.error("  set ATP_MODEL=deepseek/deepseek-v4.1-flash");
       console.error("  set ATP_API_KEY=...");
       process.exitCode = 1;
       return;

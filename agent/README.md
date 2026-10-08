@@ -56,7 +56,7 @@ the same current target — Command Code's Provider API:
 
 ```bash
 ATP_BASE_URL=https://api.commandcode.ai/provider/v1
-ATP_MODEL=deepseek/deepseek-v4-flash
+ATP_MODEL=deepseek/deepseek-v4.1-flash
 ATP_API_KEY=<the Command Code key>
 ATP_ZDR=1                    # optional: zero retention, or fail (422) — never a silent fallback
 ```

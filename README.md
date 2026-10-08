@@ -45,7 +45,7 @@ npm run typecheck
 
 ```bash
 export ATP_API_KEY=...        # Command Code 的 API key（Studio → API keys；和 CLI 同一个 key）
-export ATP_MODEL=...          # 目录里的模型 id，如 deepseek/deepseek-v4-flash
+export ATP_MODEL=...          # 目录里的模型 id，当前选用 deepseek/deepseek-v4.1-flash（1M 上下文，/chat/completions）
 export ATP_BASE_URL=https://api.commandcode.ai/provider/v1
 export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；模型没有 ZDR 上游时请求 422 失败，而不是降级
 ```
