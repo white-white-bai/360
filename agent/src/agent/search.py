@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .app import domains_dir
 from .config import config_from_env
+from .console import utf8_console
 from .rag.assets import load_passages
 from .rag.embed import embedder_from_env
 from .rag.rerank import POOL, RerankError, llm_rerank
@@ -20,6 +21,7 @@ from .rag.store import Retriever
 
 
 def main() -> int:
+    utf8_console()
     parser = argparse.ArgumentParser(description="Hybrid retrieval over the signed Domains")
     parser.add_argument("query", help="the question, in whatever language it is asked")
     parser.add_argument("--k", type=int, default=6, help="how many hits to keep")

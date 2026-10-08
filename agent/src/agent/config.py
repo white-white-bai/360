@@ -61,6 +61,17 @@ def env_flag(env: Mapping[str, str], name: str) -> bool:
     return (env.get(name) or "").strip().lower() in _FLAG_ON
 
 
+def env_number(env: Mapping[str, str], name: str) -> float | None:
+    """A number the operator wrote, or None. Unreadable is None, not a guess and not a crash."""
+    raw = (env.get(name) or "").strip()
+    if raw == "":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 @dataclass(frozen=True)
 class Config:
     api_key: str
@@ -68,6 +79,10 @@ class Config:
     base_url: str
     embed_model: str
     zdr: bool
+    # Optional, per million tokens, in the platform's own variable names — so the ledger reports
+    # money when the operator said what money is, and "price unknown" when nobody did.
+    price_in: float | None = None
+    price_out: float | None = None
 
     @property
     def chat_url(self) -> str:
@@ -113,4 +128,6 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config | None:
         base_url=base_url,
         embed_model=embed_model,
         zdr=env_flag(source, "ATP_ZDR"),
+        price_in=env_number(source, "ATP_PRICE_IN"),
+        price_out=env_number(source, "ATP_PRICE_OUT"),
     )

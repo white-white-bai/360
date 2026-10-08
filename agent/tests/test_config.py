@@ -69,3 +69,32 @@ def test_a_missing_env_file_is_not_an_error(tmp_path) -> None:
     target: dict[str, str] = {}
     load_local_env(tmp_path / "nope" / ".env", target)
     assert target == {}
+
+
+def test_prices_are_optional_and_unreadable_ones_are_none() -> None:
+    priced = config_from_env({"ATP_API_KEY": "k", "ATP_MODEL": "m", "ATP_PRICE_IN": "0.28", "ATP_PRICE_OUT": "0.42"})
+    assert priced is not None and priced.price_in == 0.28 and priced.price_out == 0.42
+
+    typo = config_from_env({"ATP_API_KEY": "k", "ATP_MODEL": "m", "ATP_PRICE_IN": "cheap"})
+    assert typo is not None and typo.price_in is None, "a typo is not a price"
+
+    bare = config_from_env({"ATP_API_KEY": "k", "ATP_MODEL": "m"})
+    assert bare is not None and bare.price_out is None
+
+
+def test_the_ledger_prices_a_model_the_operator_priced() -> None:
+    from agent.ledger import PRICES
+    from agent.model import ProviderModel
+
+    config = config_from_env(
+        {"ATP_API_KEY": "k", "ATP_MODEL": "m-priced", "ATP_PRICE_IN": "1", "ATP_PRICE_OUT": "2"}
+    )
+    assert config is not None
+    model = ProviderModel(config)
+    try:
+        model.ledger.record("lead-explainer", "m-priced", 500_000, 250_000)
+        row = model.ledger.rows()[0]
+        assert row.priced is True
+        assert row.cost_usd == 1.0
+    finally:
+        PRICES.pop("m-priced", None)

@@ -18,6 +18,11 @@ dependencies = [
   "faiss-cpu>=1.8",
   "rank-bm25>=0.2",
   "fastembed>=0.4",
+  # Stage 2 (the agent graph): LangGraph for the loop and its state, the SQLite checkpointer so
+  # a session survives the process. The model client stays our own — it carries the ZDR header
+  # and the ledger, and those are not decoration.
+  "langgraph>=0.2",
+  "langgraph-checkpoint-sqlite>=2",
 ]
 
 [project.optional-dependencies]
