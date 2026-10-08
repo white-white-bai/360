@@ -88,9 +88,12 @@ CSS = """
 #main-row { display: grid !important; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) !important; gap: 20px; }
 #main-row > * { width: auto !important; min-width: 0 !important; }
 /* The nested rows stack for the same reason the outer one did, so they get the same treatment:
-   the send button sits beside the input, the mode radio beside the thread disclosure. */
+   the send button sits beside the input, the mode radio beside the thread disclosure. Their
+   children are forced to fill their tracks — without it the textbox kept its intrinsic width
+   and left the send button marooned at the far edge. */
 #composer { display: grid !important; grid-template-columns: minmax(0, 5fr) minmax(0, 1fr) !important; gap: 12px; align-items: end; }
 #controls { display: grid !important; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) !important; gap: 12px; align-items: start; }
+#composer > *, #controls > * { width: 100% !important; min-width: 0 !important; }
 @media (max-width: 900px) { #main-row { grid-template-columns: 1fr !important; } #composer, #controls { grid-template-columns: 1fr !important; } }
 
 /* Motion explains state or it does not happen. */
@@ -348,8 +351,9 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
                     )
                     with gr.Accordion("续上一次（会话 id）", open=False):
                         thread = gr.Textbox(
-                            show_label=False,
+                            label="会话 id",
                             value="ui",
+                            lines=1,
                             placeholder="换一个名字就是新开一节",
                         )
                 gr.Examples(
