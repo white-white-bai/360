@@ -1017,7 +1017,10 @@ export function createBoardServer(options: BoardOptions = {}): Server {
 
 // Only listen when run directly; importing this in a test must not open a port.
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const port = Number(process.env.PORT ?? process.argv.find((arg) => /^\d+$/.test(arg)) ?? 8787);
+  // 18087 rather than the old 8787: installing Docker Desktop reserved 8240–8940 for Hyper-V/WSL2,
+  // and Windows refuses to bind a port inside a reserved range outright (EACCES), so the default
+  // has to live outside it. The PORT environment variable and the numeric argument still win.
+  const port = Number(process.env.PORT ?? process.argv.find((arg) => /^\d+$/.test(arg)) ?? 18087);
   createBoardServer().listen(port, () => {
     console.log(`drawing the blackboard on http://localhost:${port}/`);
     console.log("  ?live=1 to use the configured provider instead of the recorded replay");

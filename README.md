@@ -15,7 +15,7 @@
 
 ```bash
 cd platform
-npm run board          # 打开 http://localhost:8787/
+npm run board          # 打开 http://localhost:18087/
 ```
 
 入口依次是：

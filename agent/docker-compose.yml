@@ -5,7 +5,10 @@ services:
     build:
       context: .
     ports:
-      - "8788:8788"
+      # 18088 on the host, not 8788: Windows with Hyper-V/WSL2 reserves dynamic ranges
+      # (8240–8940 here), and a port inside one cannot be bound by any user process. The
+      # container's own 8788 is unaffected.
+      - "18088:8788"
     environment:
       ATP_API_KEY: ${ATP_API_KEY:-}
       ATP_MODEL: ${ATP_MODEL:-}

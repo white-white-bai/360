@@ -48,6 +48,11 @@ verified.
 - Cost arrives earlier and higher than in a workflow (embeddings plus bounded agent loops), so
   the per-actor ledger exists from stage 0 — with unknown models priced as unknown, never as
   free.
-- Docker is not installed on this machine, and this record says so rather than pretending the
-  container path was verified: the Dockerfile and compose file ship with stage 0, and the build
-  is exercised the moment Docker exists.
+- Docker was not installed when this was written; it was installed during stage 0, and the
+  acceptance ran for real: the image built through a registry mirror (Docker Hub is unreachable
+  from this network), the container came up, and `/health` answered from inside it — provider
+  null, seven Domains visible through the mounted volume. The install itself reserved the dynamic
+  range 8240–8940 for Hyper-V/WSL2 on this Windows host, where binding is refused outright
+  (EACCES): the board's 8787, which had worked until that day, stopped being bindable. The board
+  now defaults to 18087 and the service publishes 18088, both outside every reserved range —
+  ports are part of the environment's contract, not a detail.

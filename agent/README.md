@@ -25,7 +25,7 @@ python -m venv .venv
 .venv\Scripts\pip install -e ".[dev]"     # Windows;  POSIX: .venv/bin/pip
 .venv\Scripts\python -m pytest
 .venv\Scripts\python -m agent.probe        # chat + embeddings，各一次最小请求
-.venv\Scripts\uvicorn agent.app:app --port 8788   # then GET /health
+.venv\Scripts\uvicorn agent.app:app --port 18088   # then GET /health
 ```
 
 ## Docker
@@ -34,7 +34,7 @@ The delivery path (stage 4). The Dockerfile and the compose file ship with stage
 service is containerized before it grows:
 
 ```bash
-docker compose up --build        # http://localhost:8788/health
+docker compose up --build        # http://localhost:18088/health
 docker compose config            # validate the compose file alone, no daemon needed
 ```
 
