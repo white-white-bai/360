@@ -1,5 +1,6 @@
 import { costOf, isPlaceholderPrice } from "./pricing.ts";
 import { configFromEnv, MissingProviderConfig, OpenAiCompatibleProvider } from "./openai.ts";
+import { staleEnvHint, storedUserEnv } from "../util/stored-env.ts";
 
 /**
  * `npm run probe` — one tiny live call, to find out whether the configuration
@@ -15,6 +16,11 @@ async function main(): Promise<void> {
   } catch (error) {
     if (error instanceof MissingProviderConfig) {
       console.error(`${error.message}\n`);
+      // The most common reason a configured machine looks unconfigured: setx wrote the value
+      // somewhere this process cannot see (see stored-env.ts). Say so before the user starts
+      // wondering whether the key itself is wrong.
+      const hint = staleEnvHint(storedUserEnv(["ATP_API_KEY", "ATP_MODEL"]), process.env);
+      if (hint !== null) console.error(`${hint}\n`);
       console.error("Example (OpenAI-compatible, so any of OpenAI / DeepSeek / Qwen / vLLM / Ollama):");
       console.error('  set ATP_BASE_URL=https://api.deepseek.com/v1');
       console.error("  set ATP_MODEL=deepseek-chat");

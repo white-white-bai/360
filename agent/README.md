@@ -25,6 +25,7 @@ python -m venv .venv
 .venv\Scripts\pip install -e ".[dev]"     # Windows;  POSIX: .venv/bin/pip
 .venv\Scripts\python -m pytest
 .venv\Scripts\python -m agent.probe        # chat + embeddings，各一次最小请求
+probe.cmd                                  # 同上，但不用记 venv 路径（Windows）
 .venv\Scripts\uvicorn agent.app:app --port 18088   # then GET /health
 ```
 

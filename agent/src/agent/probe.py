@@ -7,7 +7,9 @@ OpenAI-compatible endpoint — shows up here first, in one command, without the 
 
 from __future__ import annotations
 
+import os
 import sys
+from typing import Mapping, Sequence
 
 import httpx
 
@@ -74,10 +76,70 @@ def probe_embeddings(client: httpx.Client, config: Config) -> bool:
     return True
 
 
+def stored_user_env(names: Sequence[str]) -> dict[str, str]:
+    """What Windows stores for this user (HKCU\\Environment) — the thing `setx` writes.
+
+    The stored value is a credential: it is returned so the caller can measure it, and no
+    caller may print it. Only ``stale_env_hint`` below ever looks at it, and only at its length.
+    """
+    if sys.platform != "win32":
+        return {}
+
+    import winreg
+
+    stored: dict[str, str] = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            for name in names:
+                try:
+                    value, _ = winreg.QueryValueEx(key, name)
+                except FileNotFoundError:
+                    continue
+                if isinstance(value, str):
+                    stored[name] = value
+    except OSError:
+        return {}
+    return stored
+
+
+def stale_env_hint(stored: Mapping[str, str], env: Mapping[str, str]) -> str | None:
+    """Why a configured machine still looks unconfigured.
+
+    `setx` only reaches processes started AFTER it ran — not the terminal that ran it, and not
+    anything already open. That mismatch has cost this project more debugging time than any
+    provider outage: the person sets the key, the next command says "not set", and the machine
+    looks broken while it is being literal.
+    """
+
+    def env_has(name: str) -> bool:
+        if name == "ATP_API_KEY":
+            return bool((env.get("ATP_API_KEY") or env.get("OPENAI_API_KEY") or "").strip())
+        return bool((env.get(name) or "").strip())
+
+    missing = [
+        name for name in ("ATP_API_KEY", "ATP_MODEL") if (stored.get(name) or "") != "" and not env_has(name)
+    ]
+    if not missing:
+        return None
+
+    shape = " and ".join(
+        f"{name} ({len(stored[name])} chars)" if name == "ATP_API_KEY" else name for name in missing
+    )
+    return (
+        f"This process has none of them, but Windows' stored environment has {shape} — "
+        "`setx` only affects terminals opened AFTER it ran. Open a new terminal and try again."
+    )
+
+
 def main() -> int:
     config = config_from_env()
     if config is None:
         print("ATP_API_KEY / ATP_MODEL are not set in this process — nothing to probe.")
+        # The most common reason a configured machine looks unconfigured. Say it before the
+        # user starts wondering whether the key itself is wrong.
+        hint = stale_env_hint(stored_user_env(["ATP_API_KEY", "ATP_MODEL"]), os.environ)
+        if hint is not None:
+            print(hint)
         print("Set them (Windows: setx, then a NEW terminal) and try again.")
         return 1
 

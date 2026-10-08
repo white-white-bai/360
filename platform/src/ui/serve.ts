@@ -26,6 +26,7 @@ import type { ClassroomMessage } from "../session/classroom.ts";
 import { misconceptionScript } from "../session/fixtures-apparatus.ts";
 import { FileSessionStore } from "../session/store.ts";
 import type { SessionStore } from "../session/store.ts";
+import { staleEnvHint, storedUserEnv } from "../util/stored-env.ts";
 
 /**
  * The blackboard, on a screen.
@@ -1024,5 +1025,11 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
   createBoardServer().listen(port, () => {
     console.log(`drawing the blackboard on http://localhost:${port}/`);
     console.log("  ?live=1 to use the configured provider instead of the recorded replay");
+    // The board is where the absence is felt. If Windows has the variables stored but this
+    // terminal does not, say it here rather than letting it surface as a 403 ten minutes in.
+    if (selectLiveProvider(process.env) === null) {
+      const hint = staleEnvHint(storedUserEnv(["ATP_API_KEY", "ATP_MODEL"]), process.env);
+      if (hint !== null) console.log(`  ${hint}`);
+    }
   });
 }
