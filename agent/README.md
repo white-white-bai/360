@@ -12,11 +12,11 @@ built one stage at a time. It shares the knowledge assets with the TypeScript pl
 | Vibe Coding | 保持（仓库自身的开发方式） |
 | RAG | Stage 1 ✓（段落级检索：本地多语 embedder + FAISS + BM25 + RRF + LLM 重排；golden hits@K 5/5） |
 | Agent 智能体 | Stage 2–3 ✓（LangGraph 有界 ReAct，3 个只读工具，独立校验节点，质疑者节点，SQLite 检查点，chat/grounded 两种模式，MCP server） |
-| 开发框架与工具栈 | Stage 0 起陆续落地（FastAPI ✓；LangGraph ✓ Stage 2；fastmcp Stage 3；Gradio/OTel Stage 4） |
+| 开发框架与工具栈 | Stage 0 起陆续落地（FastAPI ✓；LangGraph ✓ Stage 2；fastmcp ✓ Stage 3；OTel ✓ Stage 4；Gradio 未落地） |
 | FineTuning | **未落地**：本机 GPU 是 GT 710，不是推理卡，且无数据无必要 |
 | 多模态与视觉 | **未落地**：PDF/OCR 解析列为后续可选工具 |
-| 产品 | Stage 3（Gradio 原型 + 两种模式的术语映射） |
-| 交付 | Stage 0 起（Docker）；OpenTelemetry/K8s/vLLM 文档在 Stage 4 |
+| 产品 | **未落地（这一刀）**：终端与 HTTP 门已够用；Gradio 原型列为可选 |
+| 交付 | Stage 4 ✓（compose：agent + board 两服务，可选 OTel collector；K8s 清单与 vLLM 文档明确标记"未验证"） |
 
 ## Run
 
@@ -29,15 +29,30 @@ probe.cmd                                  # 同上，但不用记 venv 路径�
 .venv\Scripts\uvicorn agent.app:app --port 18088   # then GET /health
 ```
 
-## Docker
+## Docker (stage 4)
 
-The delivery path (stage 4). The Dockerfile and the compose file ship with stage 0, so the
-service is containerized before it grows:
+The whole stack, one command — verified on this machine: both containers up, `/health` answered
+from inside the agent, the board served its page, and one grounded `/chat` streamed
+`meta → tool → answer → verdicts → challenge → done` with `verified: true`.
 
 ```bash
-docker compose up --build        # http://localhost:18088/health
-docker compose config            # validate the compose file alone, no daemon needed
+docker compose up --build        # agent → http://localhost:18088/health, board → :18087
+docker compose --profile telemetry up   # + a local OTel collector that PRINTS spans (no vendor)
+docker compose down
 ```
+
+- The learner's key comes from the repository root's `.env` (gitignored) via `env_file`; it is
+  deliberately not repeated under `environment:` — a `${VAR:-}` line would override the file
+  with an empty string. On a network that cannot reach HuggingFace, build with
+  `HF_ENDPOINT=https://hf-mirror.com` (the model is baked into the image at build time).
+- `deploy/k8s.yaml` is the cluster shape, marked for what it is: **not applied anywhere**. The
+  open question it cannot answer is where a writeable `domains/` lives on a cluster — signing
+  moves a draft in, and a readOnly mount would fail at the last step.
+- `docs/vllm.md` is the local-inference path, for a machine with a real GPU. This one has a
+  GT 710, so it stays a document.
+- **Content safety is a seam, not a feature** (the plan's wording): the place it would go is the
+  model call boundary (`model.py`) and the MCP door (`mcp_server.py`); nothing is gated today,
+  and the README saying so is the honest state.
 
 ## Why it looks like this
 

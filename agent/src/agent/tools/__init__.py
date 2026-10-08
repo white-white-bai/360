@@ -19,6 +19,7 @@ from ..config import Config
 from ..rag.assets import parse_meta
 from ..rag.rerank import POOL, RerankError, llm_rerank
 from ..rag.store import Retriever
+from ..telemetry import span
 
 _TOOL_SCHEMAS: list[dict] = [
     {
@@ -107,16 +108,17 @@ class Toolbox:
         return json.dumps(payload, ensure_ascii=False)
 
     def run(self, name: str, arguments: dict) -> str:
-        if name == "search_corpus":
-            query = str(arguments.get("query", "")).strip()
-            if query == "":
-                return json.dumps({"error": "search_corpus needs a query"}, ensure_ascii=False)
-            return self.search_corpus(query)
-        if name == "list_catalogue":
-            return self.list_catalogue()
-        if name == "read_domain":
-            return self.read_domain(str(arguments.get("domain", "")).strip())
-        return json.dumps({"error": f"no tool named {name}"}, ensure_ascii=False)
+        with span("tool.call", tool=name):
+            if name == "search_corpus":
+                query = str(arguments.get("query", "")).strip()
+                if query == "":
+                    return json.dumps({"error": "search_corpus needs a query"}, ensure_ascii=False)
+                return self.search_corpus(query)
+            if name == "list_catalogue":
+                return self.list_catalogue()
+            if name == "read_domain":
+                return self.read_domain(str(arguments.get("domain", "")).strip())
+            return json.dumps({"error": f"no tool named {name}"}, ensure_ascii=False)
 
     @staticmethod
     def _hit(hit) -> dict:

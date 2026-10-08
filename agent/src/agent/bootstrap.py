@@ -8,6 +8,7 @@ is not one.
 from __future__ import annotations
 
 import sqlite3
+from functools import lru_cache
 from pathlib import Path
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -28,15 +29,32 @@ class NoProvider(RuntimeError):
     """Nothing is configured to think with — the honest state, not a crash to debug."""
 
 
+@lru_cache(maxsize=1)
+def cached_toolbox() -> Toolbox:
+    """The tools, built once per process.
+
+    The retriever is the expensive part of the stack — a model and an index over every passage —
+    and a server that rebuilt it per request would spend seconds before answering anything. The
+    toolbox needs no provider, so it can be built even when nothing is configured to think with.
+    """
+    config = config_from_env()
+    retriever = Retriever(load_passages(domains_dir()), embedder_from_env())
+    return Toolbox(retriever=retriever, domains_dir=domains_dir(), rerank_config=config)
+
+
 def live_stack(*, rerank: bool = True) -> tuple[Config, Ledger, ProviderModel, Toolbox]:
     """Provider, ledger, model and tools, built the one way."""
+    from .telemetry import configured  # lazy: nothing here needs a tracer until the stack runs
+
+    configured()
     config = config_from_env()
     if config is None:
         raise NoProvider("没有配置 provider（ATP_API_KEY / ATP_MODEL；也可写进仓库根目录的 .env）")
     ledger = Ledger()
     model = ProviderModel(config, ledger)
-    retriever = Retriever(load_passages(domains_dir()), embedder_from_env())
-    toolbox = Toolbox(retriever=retriever, domains_dir=domains_dir(), rerank_config=config if rerank else None)
+    toolbox = cached_toolbox()
+    if not rerank:
+        toolbox = Toolbox(retriever=toolbox.retriever, domains_dir=toolbox.domains_dir, rerank_config=None)
     return config, ledger, model, toolbox
 
 

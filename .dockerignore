@@ -1,0 +1,11 @@
+# The board's build context is the repository root, so this keeps the context small: the board
+# needs platform/ and the mounted assets, and nothing else.
+.git/
+**/node_modules/
+**/__pycache__/
+**/.venv/
+**/.state/
+agent/
+domains/*/sources/
+platform/.sessions/
+.commandcode/

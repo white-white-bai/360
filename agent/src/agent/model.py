@@ -16,6 +16,7 @@ import httpx
 
 from .config import Config
 from .ledger import PRICES, Ledger
+from .telemetry import span
 
 
 @dataclass
@@ -81,12 +82,13 @@ class ProviderModel:
             body["tools"] = list(tools)
 
         try:
-            response = httpx.post(
-                self.config.chat_url,
-                headers={**self.config.auth_headers(), "content-type": "application/json"},
-                json=body,
-                timeout=self.timeout,
-            )
+            with span("model.call", actor=actor, model=self.config.model):
+                response = httpx.post(
+                    self.config.chat_url,
+                    headers={**self.config.auth_headers(), "content-type": "application/json"},
+                    json=body,
+                    timeout=self.timeout,
+                )
         except httpx.RequestError as error:
             raise ProviderError(f"provider unreachable: {error}") from error
 

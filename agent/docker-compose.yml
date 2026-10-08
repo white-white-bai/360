@@ -1,19 +1,56 @@
-# Stage 0: the service alone. Every stage ships what it runs and nothing it does not
-# (ADR 0013) — a Milvus profile arrives when retrieval does, not before.
+# The whole stack, one command (stage 4's acceptance): `docker compose up --build`.
+#
+# What runs: the agent service (stages 1-3 — retrieval, the graph, the MCP doors), the board
+# (the TypeScript platform, mounted on the same assets), and — behind the `telemetry` profile —
+# a local OpenTelemetry collector that prints spans instead of shipping them anywhere.
+#
+# The learner's key comes from the repository root's .env (gitignored; see the READMEs). It is
+# not repeated under `environment:` on purpose — a `VAR: ${VAR:-}` line would override the file
+# with an empty string on a machine whose shell has not sourced it, which is the exact bug the
+# .env exists to prevent.
 services:
   agent:
     build:
       context: .
+      args:
+        # Pass HF_ENDPOINT=https://hf-mirror.com on a network that cannot reach HuggingFace.
+        HF_ENDPOINT: ${HF_ENDPOINT:-}
     ports:
-      # 18088 on the host, not 8788: Windows with Hyper-V/WSL2 reserves dynamic ranges
-      # (8240–8940 here), and a port inside one cannot be bound by any user process. The
-      # container's own 8788 is unaffected.
       - "18088:8788"
+    env_file:
+      - path: ../.env
+        required: false
     environment:
-      ATP_API_KEY: ${ATP_API_KEY:-}
-      ATP_MODEL: ${ATP_MODEL:-}
-      ATP_BASE_URL: ${ATP_BASE_URL:-}
-      ATP_EMBED_MODEL: ${ATP_EMBED_MODEL:-}
       ATP_DOMAINS_DIR: /domains
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     volumes:
       - ../domains:/domains:ro
+      - agent-state:/app/.state
+
+  board:
+    build:
+      context: ..
+      dockerfile: platform/Dockerfile
+    ports:
+      - "18087:18087"
+    env_file:
+      - path: ../.env
+        required: false
+    environment:
+      PORT: "18087"
+    volumes:
+      - ../domains:/app/domains
+      - ../domains-draft:/app/domains-draft
+      - board-sessions:/app/platform/.sessions
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    profiles: ["telemetry"]
+    ports:
+      - "4318:4318"
+    volumes:
+      - ./docker/otel.yaml:/etc/otelcol-contrib/config.yaml
+
+volumes:
+  agent-state:
+  board-sessions:

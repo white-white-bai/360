@@ -14,7 +14,7 @@ def test_health_says_what_it_can_see(tmp_path: Path) -> None:
     client = TestClient(create_app(domains=domains))
     body = client.get("/health").json()
     assert body["status"] == "ok"
-    assert body["stage"] == "0"
+    assert body["stage"] == "3"
     assert body["domains"] == 1, "only directories with a meta.md are Domains"
     assert body["domainsDir"] == str(domains)
 

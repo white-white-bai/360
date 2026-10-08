@@ -1,0 +1,101 @@
+# The shapes a cluster would need — NOT applied anywhere: this machine has no cluster, and a
+# manifest nobody has run is a drawing (the same reason vLLM has a document instead of a
+# container). What IS exercised on this machine is the compose stack, which these mirror.
+#
+# Two things need a real cluster before this file can be called verified:
+#   1. `kubectl apply --dry-run=server` against a live API server (no kubectl here).
+#   2. Where the Domains actually live. A real deployment must mount a volume the signing flow
+#      can write — signing MOVES a draft into domains/, and a readOnly mount would make the
+#      gate fail at the last step. That is the design question this drawing cannot answer.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agent-state
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: agent }
+  template:
+    metadata:
+      labels: { app: agent }
+    spec:
+      containers:
+        - name: agent
+          image: atp-agent:latest
+          ports:
+            - containerPort: 8788
+          env:
+            - { name: ATP_DOMAINS_DIR, value: /domains }
+          envFrom:
+            # The provider key, as a Secret — never a ConfigMap, never an env: literal.
+            - secretRef: { name: atp-provider, optional: true }
+          volumeMounts:
+            - { name: domains, mountPath: /domains, readOnly: true }
+            - { name: state, mountPath: /app/.state }
+      volumes:
+        - name: domains
+          persistentVolumeClaim: { claimName: atp-domains }
+        - name: state
+          persistentVolumeClaim: { claimName: agent-state }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agent
+spec:
+  selector: { app: agent }
+  ports:
+    - { port: 8788, targetPort: 8788 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: board
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: board }
+  template:
+    metadata:
+      labels: { app: board }
+    spec:
+      containers:
+        - name: board
+          image: atp-board:latest
+          ports:
+            - containerPort: 18087
+          env:
+            - { name: PORT, value: "18087" }
+          envFrom:
+            - secretRef: { name: atp-provider, optional: true }
+          volumeMounts:
+            # Writeable on purpose: signing moves drafts into domains/ (ADR 0010).
+            - { name: domains, mountPath: /app/domains }
+            - { name: drafts, mountPath: /app/domains-draft }
+            - { name: sessions, mountPath: /app/platform/.sessions }
+      volumes:
+        - name: domains
+          persistentVolumeClaim: { claimName: atp-domains }
+        - name: drafts
+          persistentVolumeClaim: { claimName: atp-drafts }
+        - name: sessions
+          persistentVolumeClaim: { claimName: board-sessions }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: board
+spec:
+  selector: { app: board }
+  ports:
+    - { port: 18087, targetPort: 18087 }
