@@ -1,0 +1,16 @@
+# Stage 0: the service alone. Every stage ships what it runs and nothing it does not
+# (ADR 0013) — a Milvus profile arrives when retrieval does, not before.
+services:
+  agent:
+    build:
+      context: .
+    ports:
+      - "8788:8788"
+    environment:
+      ATP_API_KEY: ${ATP_API_KEY:-}
+      ATP_MODEL: ${ATP_MODEL:-}
+      ATP_BASE_URL: ${ATP_BASE_URL:-}
+      ATP_EMBED_MODEL: ${ATP_EMBED_MODEL:-}
+      ATP_DOMAINS_DIR: /domains
+    volumes:
+      - ../domains:/domains:ro

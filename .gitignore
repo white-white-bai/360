@@ -19,6 +19,13 @@ domains/*/sources/
 # this particular person works, and it is not anyone else's business.
 .commandcode/taste/
 
+# Python — the full-stack service (ADR 0013). The venv is local; the assets it reads are
+# shared and remain tracked where they have always lived.
+agent/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
 # Scratch
 *.log
 .DS_Store

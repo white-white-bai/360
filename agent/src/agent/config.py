@@ -1,0 +1,52 @@
+"""Configuration — the same names the TypeScript platform already uses.
+
+One environment, two stacks (ADR 0013): ``ATP_API_KEY`` / ``ATP_MODEL`` / ``ATP_BASE_URL`` mean
+exactly what they mean under ``platform/``, and ``ATP_EMBED_MODEL`` names the embedding model the
+RAG stage will need. Nothing here ever puts the key itself into a message: it is read once, kept,
+and reported only as a length.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Mapping
+
+DEFAULT_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_EMBED_MODEL = "text-embedding-3-small"
+
+
+@dataclass(frozen=True)
+class Config:
+    api_key: str
+    model: str
+    base_url: str
+    embed_model: str
+
+    @property
+    def chat_url(self) -> str:
+        return f"{self.base_url}/chat/completions"
+
+    @property
+    def embeddings_url(self) -> str:
+        return f"{self.base_url}/embeddings"
+
+    def describe(self) -> str:
+        """What is safe to print: the endpoint, the models, and the key's LENGTH."""
+        return f"{self.model} at {self.base_url} · key {len(self.api_key)} chars"
+
+
+def config_from_env(env: Mapping[str, str] | None = None) -> Config | None:
+    """The provider this process can reach, or None.
+
+    Both a key AND a model are required, exactly as the terminal instructions have said all
+    along — a key with no model is a machine that does not know what it would run.
+    """
+    source = os.environ if env is None else env
+    api_key = (source.get("ATP_API_KEY") or source.get("OPENAI_API_KEY") or "").strip()
+    model = (source.get("ATP_MODEL") or "").strip()
+    if api_key == "" or model == "":
+        return None
+    base_url = (source.get("ATP_BASE_URL") or "").strip().rstrip("/") or DEFAULT_BASE_URL
+    embed_model = (source.get("ATP_EMBED_MODEL") or "").strip() or DEFAULT_EMBED_MODEL
+    return Config(api_key=api_key, model=model, base_url=base_url, embed_model=embed_model)
