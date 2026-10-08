@@ -63,6 +63,10 @@ def test_the_transcript_labels_both_voices_and_keeps_the_learner_s_words_as_text
     )
     assert "主讲" in text and "你" in text
     assert "**要点**" in text, "the teacher's markdown stays markdown"
+    assert '<div class="said">\n\n' in text, (
+        "and it is separated by a blank line: CommonMark does not parse markdown inside a "
+        "block-level HTML element without one — the first build shipped literal asterisks"
+    )
     assert "&lt;b&gt;" in text and "<b>" not in text, "a learner who types html gets to see html"
 
 

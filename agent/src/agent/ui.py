@@ -78,6 +78,12 @@ CSS = """
 /* Keyboard: a ring you can see on a dark surface. */
 .gradio-container *:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
+/* The two panes sit side by side at desktop widths: gradio's responsive collapse had fired on
+   a ~1900px window (the transcript and the record stacked), so the row is forced to stay a row
+   and its columns to shrink rather than wrap. */
+.gradio-container .row { flex-wrap: nowrap !important; align-items: flex-start !important; }
+.gradio-container .row > .column { min-width: 0 !important; }
+
 /* Motion explains state or it does not happen. */
 @media (prefers-reduced-motion: reduce) {
   .gradio-container * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
@@ -124,8 +130,10 @@ GREETING_TURNS = [{"role": "assistant", "content": GREETING}]
 def render_transcript(turns: list[dict]) -> str:
     """The whole conversation, in the board's narration shape.
 
-    The teacher's turns are model markdown and render as markdown; the learner's are their own
-    words and must render as TEXT — a learner who types `<b>` gets to see `<b>`.
+    The teacher's turns are model markdown and render as markdown — which needs a blank line
+    after the opening div, because CommonMark does not parse markdown inside a block-level HTML
+    element without one (the first build shipped literal `**asterisks**`). The learner's words
+    are their own and must render as TEXT: someone who types `<b>` gets to see `<b>`.
     """
     blocks: list[str] = []
     for turn in turns:
@@ -134,7 +142,10 @@ def render_transcript(turns: list[dict]) -> str:
             safe = html.escape(content).replace("\n", "<br>")
             blocks.append(f'<div class="turn learner"><div class="who">你</div><div class="said">{safe}</div></div>')
         else:
-            blocks.append(f'<div class="turn teacher"><div class="who">主讲</div><div class="said">{content}</div></div>')
+            blocks.append(
+                '<div class="turn teacher"><div class="who">主讲</div>\n\n'
+                f"<div class=\"said\">\n\n{content}\n\n</div>\n\n</div>"
+            )
     return "\n".join(blocks)
 
 
@@ -300,7 +311,7 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
     ).set(**tokens)
 
     handle = make_handler(agent_factory or build_agent)
-    with gr.Blocks(title="教学平台 · agent", theme=theme, css=CSS) as demo:
+    with gr.Blocks(title="教学平台 · agent", theme=theme, css=CSS, analytics_enabled=False) as demo:
         gr.Markdown(
             "## agent 课堂\n"
             '<span class="faint" style="color:#9fb3aa">同一个图，换一双眼睛。'
@@ -349,7 +360,10 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
 def main() -> int:
     utf8_console()
     port = int(os.environ.get("ATP_UI_PORT", "18089"))
-    build_ui().launch(server_name="127.0.0.1", server_port=port, head=HEAD)
+    # `head` belongs to launch(), not Blocks: Blocks accepts the kwarg silently and serves
+    # nothing. `footer_links=[]` removes gradio's own footer — the "Use via API" button and the
+    # logo, which rendered as an enormous orange chevron on this page.
+    build_ui().launch(server_name="127.0.0.1", server_port=port, head=HEAD, footer_links=[])
     return 0
 
 
