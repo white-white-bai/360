@@ -125,3 +125,20 @@ class Retriever:
             )
             for index in ordered[:k]
         ]
+
+
+def merge_hits(pools: Sequence[Sequence[Hit]]) -> list[Hit]:
+    """Several queries' results in first-seen order, one Hit per passage.
+
+    First-seen means the learner's own question leads and a reformulation can only ADD passages —
+    it cannot demote what was actually asked. The rerank, when it runs, has the last word anyway.
+    """
+    seen: set[str] = set()
+    merged: list[Hit] = []
+    for pool in pools:
+        for hit in pool:
+            key = f"{hit.passage.domain}·{hit.passage.passage_id}"
+            if key not in seen:
+                seen.add(key)
+                merged.append(hit)
+    return merged

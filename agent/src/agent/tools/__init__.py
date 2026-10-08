@@ -19,7 +19,8 @@ from ..config import Config
 from ..memory import learner_brief
 from ..rag.assets import parse_meta
 from ..rag.rerank import POOL, RerankError, llm_rerank
-from ..rag.store import Retriever
+from ..rag.rewrite import RewriteError, rewrite_query
+from ..rag.store import Retriever, merge_hits
 from ..telemetry import span
 
 _TOOL_SCHEMAS: list[dict] = [
@@ -101,6 +102,9 @@ class Toolbox:
     retriever: Retriever
     domains_dir: Path
     rerank_config: Config | None = None
+    # The query rewriter: one cheap call that turns the learner's question into up to three
+    # search queries. None disables it (and is what the measurement compares against).
+    rewrite_config: Config | None = None
     # Where the learner's own session records live (the TypeScript platform writes them); None
     # means the memory tool answers "no records", which is the honest shape for a fresh machine.
     sessions_dir: Path | None = None
@@ -116,16 +120,27 @@ class Toolbox:
         return [schema for schema in tool_schemas() if schema["function"]["name"] in self.allowed]
 
     def search_corpus(self, query: str) -> str:
-        pool = self.retriever.search(query, k=POOL)
+        notes: list[str] = []
+        queries = [query]
+        if self.rewrite_config is not None:
+            try:
+                queries = rewrite_query(query, config=self.rewrite_config)
+            except RewriteError as error:
+                notes.append(f"rewrite skipped: {error}")
+
+        pool = merge_hits([self.retriever.search(one, k=POOL) for one in queries])[:POOL]
         if self.rerank_config is not None and pool:
             try:
                 pool = llm_rerank(query, pool, config=self.rerank_config)
             except RerankError as error:
-                # A rerank that cannot happen leaves the fused order — retrieval degrades, it
+                # A rerank that cannot happen leaves the merged order — retrieval degrades, it
                 # does not fail. The reason travels in the result so the model can weigh it.
-                results = [self._hit(hit) for hit in pool[:5]]
-                return json.dumps({"hits": results, "note": f"rerank skipped: {error}"}, ensure_ascii=False)
-        return json.dumps({"hits": [self._hit(hit) for hit in pool[:5]]}, ensure_ascii=False)
+                notes.append(f"rerank skipped: {error}")
+
+        payload: dict = {"hits": [self._hit(hit) for hit in pool[:5]], "queries": queries}
+        if notes:
+            payload["note"] = "；".join(notes)
+        return json.dumps(payload, ensure_ascii=False)
 
     def list_catalogue(self) -> str:
         entries: list[dict[str, str]] = []

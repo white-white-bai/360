@@ -25,6 +25,7 @@ def main() -> int:
     parser.add_argument("--thread", default="terminal", help="the session id; repeating one continues it")
     parser.add_argument("--max-steps", type=int, default=4, help="model calls a turn may spend")
     parser.add_argument("--no-rerank", action="store_true", help="keep the fused order for searches")
+    parser.add_argument("--rewrite", action="store_true", help="改写查询再检索（实测无增益，默认关）")
     parser.add_argument("--tools", default=None, help="逗号分隔的会话白名单，如 search_corpus,read_domain")
     args = parser.parse_args()
 
@@ -35,7 +36,9 @@ def main() -> int:
         return 2
 
     try:
-        _, ledger, model, toolbox = live_stack(rerank=not args.no_rerank, tools=allowed)
+        _, ledger, model, toolbox = live_stack(
+            rerank=not args.no_rerank, rewrite=args.rewrite, tools=allowed
+        )
     except NoProvider as error:
         print(str(error), file=sys.stderr)
         return 1

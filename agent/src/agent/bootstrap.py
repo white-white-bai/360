@@ -43,17 +43,22 @@ def cached_toolbox() -> Toolbox:
         retriever=retriever,
         domains_dir=domains_dir(),
         rerank_config=config,
+        # Off by default: measured on the golden set, rewriting changes nothing (5/5 either way)
+        # and costs a call per search. live_stack can turn it back on per session.
+        rewrite_config=None,
         sessions_dir=sessions_dir(),
     )
 
 
 def live_stack(
-    *, rerank: bool = True, tools: frozenset[str] | None = None
+    *, rerank: bool = True, rewrite: bool = False, tools: frozenset[str] | None = None
 ) -> tuple[Config, Ledger, ProviderModel, Toolbox]:
     """Provider, ledger, model and tools, built the one way.
 
     `tools` is a session policy: None means every tool (`schemas()` shows them all), a set means
     only those — filtered where the model is OFFERED tools, not merely where they are refused.
+    `rerank`/`rewrite` turn off the two model-in-the-loop retrieval steps, which is how the
+    measurement compares against them rather than trusting them.
     """
     from .telemetry import configured  # lazy: nothing here needs a tracer until the stack runs
 
@@ -68,6 +73,7 @@ def live_stack(
         retriever=base.retriever,
         domains_dir=base.domains_dir,
         rerank_config=base.rerank_config if rerank else None,
+        rewrite_config=config if rewrite else None,
         sessions_dir=base.sessions_dir,
         allowed=tools,
     )

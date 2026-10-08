@@ -104,6 +104,10 @@ Two things this provider does not give the later stages: **no embeddings endpoin
 - **The rerank earns its place**: the hybrid alone put two golden targets at rank 9 and 15 —
   inside the pool, outside any k worth returning. If the rerank cannot happen, the fused order
   stands and the CLI says so.
+- **The query rewriter was built and MEASURED, and stays off.** On the golden set, rewriting
+  changes nothing (hits@K 5/5 either way, same four first places) and costs a call per search —
+  so the default is off and `--rewrite` turns it on. A lever that does not move its own number
+  stays down.
 
 ## The agent (stage 2)
 

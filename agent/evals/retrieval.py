@@ -3,11 +3,17 @@
 Stage 1's acceptance (the plan): each query must place its target passage in the top K. This is
 not a pytest because it needs the real local model — a download on first use. The unit tests pin
 the machinery with the fake embedder; this script tells the truth about retrieval quality on the
-machine it runs on, and fails loudly rather than quietly skipping.
+machine it runs on, and it runs the PRODUCTION path (`Toolbox.search_corpus`) rather than a
+parallel one, so what it measures is what the agent gets.
+
+`--no-rewrite` / `--no-rerank` turn off the two model-in-the-loop steps one at a time — the
+comparison that decides whether each earns its place.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -17,8 +23,8 @@ from agent.app import domains_dir  # noqa: E402
 from agent.config import config_from_env  # noqa: E402
 from agent.rag.assets import load_passages  # noqa: E402
 from agent.rag.embed import embedder_from_env  # noqa: E402
-from agent.rag.rerank import POOL, RerankError, llm_rerank  # noqa: E402
 from agent.rag.store import Retriever  # noqa: E402
+from agent.tools import Toolbox  # noqa: E402
 
 # (question, acceptable passages, within top K).
 #
@@ -36,10 +42,9 @@ GOLDEN: list[tuple[str, tuple[str, ...], int]] = [
 
 
 def main() -> int:
-    import argparse
-
     parser = argparse.ArgumentParser(description="Golden retrieval acceptance")
-    parser.add_argument("--no-rerank", action="store_true", help="score the hybrid alone")
+    parser.add_argument("--no-rerank", action="store_true", help="skip the cross-encoder-style rerank")
+    parser.add_argument("--rewrite", action="store_true", help="改写查询（实测无增益，默认关）")
     args = parser.parse_args()
 
     directory = domains_dir()
@@ -50,31 +55,33 @@ def main() -> int:
 
     embedder = embedder_from_env()
     retriever = Retriever(passages, embedder)
-    rerank_config = None if args.no_rerank else config_from_env()
+    config = config_from_env()
+    toolbox = Toolbox(
+        retriever=retriever,
+        domains_dir=directory,
+        rerank_config=None if args.no_rerank else config,
+        rewrite_config=config if args.rewrite else None,
+    )
     print(
         f"{len(passages)} passages · embedder {embedder.name} · "
-        f"rerank {'off' if args.no_rerank else ('on' if rerank_config else 'requested but no provider')}\n"
+        f"rewrite {'on' if args.rewrite else 'off'} · rerank {'off' if args.no_rerank else 'on'}\n"
     )
 
     missed = 0
     for question, accepted, top in GOLDEN:
-        hits = retriever.search(question, k=top if args.no_rerank else max(top, POOL))
-        if not args.no_rerank:
-            try:
-                hits = llm_rerank(question, hits, config=rerank_config)
-            except RerankError as error:
-                print(f"（rerank failed: {error}）")
-        hits = hits[:top]
-        rank = next(
-            (index for index, hit in enumerate(hits, start=1) if hit.passage.passage_id in accepted),
-            None,
-        )
+        payload = json.loads(toolbox.search_corpus(question))
+        hits = payload["hits"][:top]
+        rank = next((index for index, hit in enumerate(hits, start=1) if hit["id"] in accepted), None)
         mark = f"hit #{rank}" if rank is not None else "MISS"
         if rank is None:
             missed += 1
-        got = ", ".join(hit.passage.passage_id for hit in hits)
         print(f"{mark:8} top-{top}  {question}")
-        print(f"         wanted {' | '.join(accepted)} · got: {got}")
+        print(f"         wanted {' | '.join(accepted)} · got: {', '.join(hit['id'] for hit in hits)}")
+        queries = payload.get("queries", [])
+        if len(queries) > 1:
+            print(f"         查询：{' | '.join(queries)}")
+        if payload.get("note"):
+            print(f"         备注：{payload['note']}")
 
     total = len(GOLDEN)
     print(f"\nhits@K: {total - missed}/{total}")
