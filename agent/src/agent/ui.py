@@ -48,16 +48,19 @@ CSS = """
 .gradio-container button.primary { background: var(--accent) !important; color: #1b2f28 !important; border: 0 !important; }
 .gradio-container input, .gradio-container textarea {
   background: #0e1a17 !important; color: var(--chalk) !important; border-color: #2c4a42 !important;
+  width: 100% !important;
 }
 /* The visible fill of a textbox lives on its wrapper, not on the <textarea> itself — the first
-   screenshot with a working layout showed a white input on the dark page. */
+   screenshot with a working layout showed a white input on the dark page, and the first one
+   after the width fix showed a ~160px box: a textarea keeps its intrinsic width (its cols)
+   unless it is told otherwise. */
 .gradio-container [class*="input"] { background: #0e1a17 !important; }
 .gradio-container ::placeholder { color: #6f8a80 !important; }
 
 /* The transcript, in the board's narration shape: an actor label, prose on a ruled edge for the
    teacher, a tinted block for the learner. Light-on-dark reads thinner, so more air and a trace
    of tracking; the measure stays inside a comfortable line length. */
-#transcript { max-height: 58vh; overflow-y: auto; padding-right: 8px; font-size: 15px; }
+#transcript { max-height: 58vh; min-height: 260px; overflow-y: auto; padding-right: 8px; font-size: 15px; width: 100% !important; }
 #transcript .turn { margin: 0 0 20px; }
 #transcript .turn .who { font-size: 11px; letter-spacing: .14em; color: var(--dim); margin-bottom: 4px; }
 #transcript .turn.teacher { border-left: 2px solid var(--grid); padding-left: 14px; }
@@ -86,14 +89,24 @@ CSS = """
    respond to being forced (the previous rule changed nothing on a ~1900px window), so the
    outer row gets OUR id and becomes a grid: one mechanism, on a hook we control. */
 #main-row { display: grid !important; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) !important; gap: 20px; }
-#main-row > * { width: auto !important; min-width: 0 !important; }
+#main-row > * { width: 100% !important; min-width: 0 !important; max-width: none !important; justify-self: stretch !important; }
+#main-row .block { width: 100% !important; }
 /* The nested rows stack for the same reason the outer one did, so they get the same treatment:
    the send button sits beside the input, the mode radio beside the thread disclosure. Their
    children are forced to fill their tracks — without it the textbox kept its intrinsic width
    and left the send button marooned at the far edge. */
 #composer { display: grid !important; grid-template-columns: minmax(0, 5fr) minmax(0, 1fr) !important; gap: 12px; align-items: end; }
 #controls { display: grid !important; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) !important; gap: 12px; align-items: start; }
-#composer > *, #controls > * { width: 100% !important; min-width: 0 !important; }
+#composer > *, #controls > * { min-width: 0 !important; }
+/* Only the things that should fill are told to: a blanket width:100% turned the mode radio's
+   two options into one-per-row (its inner container spreads and the labels take the row). */
+#composer > * { width: 100% !important; }
+#thread-box { width: 100% !important; }
+/* The mode radio's two options are <label>s inside .wrap; this gradio version lays them out
+   one per row with the dot pushed to the far edge. Read from the dumped DOM, not guessed —
+   the same way the earlier row/column hooks were found to be wrong. */
+#mode-radio .wrap { display: flex !important; flex-direction: row !important; flex-wrap: wrap !important; gap: 18px !important; }
+#mode-radio .wrap label { width: auto !important; flex: 0 0 auto !important; display: flex !important; flex-direction: row !important; align-items: center !important; gap: 6px !important; }
 @media (max-width: 900px) { #main-row { grid-template-columns: 1fr !important; } #composer, #controls { grid-template-columns: 1fr !important; } }
 
 /* Motion explains state or it does not happen. */
@@ -347,9 +360,10 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
                         value="grounded",
                         label="模式",
                         scale=3,
+                        elem_id="mode-radio",
                         info="grounded：先检索、再回答、另一位 actor 逐条核对；chat：直接课堂，无校验。",
                     )
-                    with gr.Accordion("续上一次（会话 id）", open=False):
+                    with gr.Accordion("续上一次（会话 id）", open=False, elem_id="thread-box"):
                         thread = gr.Textbox(
                             label="会话 id",
                             value="ui",
