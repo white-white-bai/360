@@ -49,6 +49,10 @@ CSS = """
 .gradio-container input, .gradio-container textarea {
   background: #0e1a17 !important; color: var(--chalk) !important; border-color: #2c4a42 !important;
 }
+/* The visible fill of a textbox lives on its wrapper, not on the <textarea> itself — the first
+   screenshot with a working layout showed a white input on the dark page. */
+.gradio-container [class*="input"] { background: #0e1a17 !important; }
+.gradio-container ::placeholder { color: #6f8a80 !important; }
 
 /* The transcript, in the board's narration shape: an actor label, prose on a ruled edge for the
    teacher, a tinted block for the learner. Light-on-dark reads thinner, so more air and a trace
@@ -83,7 +87,11 @@ CSS = """
    outer row gets OUR id and becomes a grid: one mechanism, on a hook we control. */
 #main-row { display: grid !important; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) !important; gap: 20px; }
 #main-row > * { width: auto !important; min-width: 0 !important; }
-@media (max-width: 900px) { #main-row { grid-template-columns: 1fr !important; } }
+/* The nested rows stack for the same reason the outer one did, so they get the same treatment:
+   the send button sits beside the input, the mode radio beside the thread disclosure. */
+#composer { display: grid !important; grid-template-columns: minmax(0, 5fr) minmax(0, 1fr) !important; gap: 12px; align-items: end; }
+#controls { display: grid !important; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) !important; gap: 12px; align-items: start; }
+@media (max-width: 900px) { #main-row { grid-template-columns: 1fr !important; } #composer, #controls { grid-template-columns: 1fr !important; } }
 
 /* Motion explains state or it does not happen. */
 @media (prefers-reduced-motion: reduce) {
@@ -322,7 +330,7 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
             with gr.Column(scale=3):
                 transcript = gr.Markdown(render_transcript(GREETING_TURNS), elem_id="transcript")
                 turns = gr.State(list(GREETING_TURNS))
-                with gr.Row():
+                with gr.Row(elem_id="composer"):
                     message = gr.Textbox(
                         label="你的话",
                         lines=2,
@@ -330,7 +338,7 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
                         placeholder="用你自己的话说说，或直接问……（Enter 发送）",
                     )
                     send = gr.Button("发送", variant="primary", size="lg", scale=1)
-                with gr.Row():
+                with gr.Row(elem_id="controls"):
                     mode = gr.Radio(
                         ["grounded", "chat"],
                         value="grounded",
