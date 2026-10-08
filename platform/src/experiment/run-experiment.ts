@@ -6,6 +6,7 @@ import { describeExpert } from "../experts/types.ts";
 import { selectLiveProvider } from "../providers/live.ts";
 import { ScriptedProvider } from "../providers/scripted.ts";
 import type { ModelProvider } from "../providers/types.ts";
+import { loadRepoEnv } from "../util/local-env.ts";
 import { apparatusTrialScript, baselineTrialScript, EXPERIMENT_LIST, PROFILES } from "./fixtures-experiment.ts";
 import type { Condition, TrialResult } from "./harness.ts";
 import { compare, runTrial } from "./harness.ts";
@@ -35,6 +36,8 @@ const usd = (value: number): string => `$${value.toFixed(4)}`;
 const TICK_MS = 4000;
 
 async function main(): Promise<void> {
+  // The repo's local .env first: a key that lives there is found before anything asks for one.
+  loadRepoEnv();
   const live = process.argv.includes("--live");
   const liveSelection = live ? selectLiveProvider() : null;
 

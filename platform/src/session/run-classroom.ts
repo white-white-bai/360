@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 
 import { loadLibrary } from "../experts/load.ts";
 import { selectLiveProvider } from "../providers/live.ts";
+import { loadRepoEnv } from "../util/local-env.ts";
 import { CLASSROOM_ACTOR, runClassroomTurn } from "./classroom.ts";
 import type { ClassroomMessage } from "./classroom.ts";
 
@@ -29,6 +30,8 @@ function option(argv: readonly string[], name: string): string | undefined {
 }
 
 async function main(): Promise<void> {
+  // The repo's local .env first: a key that lives there is found before anything asks for one.
+  loadRepoEnv();
   const argv = process.argv.slice(2);
   const flags = ["--persona", "--style", "--challenger"];
   const topic = argv

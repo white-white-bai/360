@@ -61,6 +61,11 @@ ATP_API_KEY=<the Command Code key>
 ATP_ZDR=1                    # optional: zero retention, or fail (422) — never a silent fallback
 ```
 
+Both stacks also read the repository root's `.env` (gitignored; the process environment wins).
+That file is the key's home on a machine — never a tracked source file: `setx` only reaches
+terminals opened afterwards, and a key written into code is a key in git history waiting to
+happen.
+
 Two things this provider does not give the later stages: **no embeddings endpoint** (stage 1's
 RAG needs another source or the local fallback), and **Claude models answer on `/messages`
 only** — that is the platform's Anthropic adapter's job, not this service's.

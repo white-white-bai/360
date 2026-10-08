@@ -50,6 +50,8 @@ export ATP_BASE_URL=https://api.commandcode.ai/provider/v1
 export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；模型没有 ZDR 上游时请求 422 失败，而不是降级
 ```
 
+不方便动 `setx`/`export` 也行：把上面几行写进仓库根目录的 **`.env`**——两个栈的入口（board / enter / classroom / probe 与 agent 的自检）都会读它；已进 `.gitignore`，永不提交；同名变量进程环境优先。
+
 几条边界，免得撞上：**Claude 模型只在 `/messages` 上应答**（走 `/chat/completions` 会 400），改用 `ATP_ANTHROPIC_MODEL` / `ATP_ANTHROPIC_API_KEY` / `ATP_ANTHROPIC_BASE_URL`（同样指向 `https://api.commandcode.ai/provider/v1`）；**Go 套餐没有 API 权限**（403 `upgrade_required`，401 才是 key 不对）；该提供商的端点里**没有 embeddings**，所以 RAG 阶段（Stage 1）要另找 embedding 源或走本地兜底。模型目录可直接看 `GET /provider/v1/models`（每个模型带 `supported_endpoints`）。
 
 没有配置 provider 时：网页玩录播回放（只有一节：时间戳、时区与夏令时），直接课堂被锁——它的每句话都来自模型。

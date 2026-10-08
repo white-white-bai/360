@@ -27,6 +27,7 @@ import { misconceptionScript } from "../session/fixtures-apparatus.ts";
 import { FileSessionStore } from "../session/store.ts";
 import type { SessionStore } from "../session/store.ts";
 import { staleEnvHint, storedUserEnv } from "../util/stored-env.ts";
+import { loadRepoEnv } from "../util/local-env.ts";
 
 /**
  * The blackboard, on a screen.
@@ -1018,6 +1019,10 @@ export function createBoardServer(options: BoardOptions = {}): Server {
 
 // Only listen when run directly; importing this in a test must not open a port.
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  // The repo's local .env first: a key that lives there is found before anything asks for one.
+  // Deliberately inside the direct-run guard — importing this module (tests do) must not read
+  // the machine's own file into the process.
+  loadRepoEnv();
   // 18087 rather than the old 8787: installing Docker Desktop reserved 8240–8940 for Hyper-V/WSL2,
   // and Windows refuses to bind a port inside a reserved range outright (EACCES), so the default
   // has to live outside it. The PORT environment variable and the numeric argument still win.

@@ -1,6 +1,7 @@
 import { costOf, isPlaceholderPrice } from "./pricing.ts";
 import { configFromEnv, MissingProviderConfig, OpenAiCompatibleProvider } from "./openai.ts";
 import { staleEnvHint, storedUserEnv } from "../util/stored-env.ts";
+import { loadRepoEnv } from "../util/local-env.ts";
 
 /**
  * `npm run probe` — one tiny live call, to find out whether the configuration
@@ -10,6 +11,8 @@ import { staleEnvHint, storedUserEnv } from "../util/stored-env.ts";
  * a credential into a terminal or a log is worse than the failure it reports.
  */
 async function main(): Promise<void> {
+  // The repo's local .env first: a key that lives there is found before anything asks for one.
+  loadRepoEnv();
   let config;
   try {
     config = configFromEnv();

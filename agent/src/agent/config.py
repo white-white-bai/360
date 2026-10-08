@@ -9,13 +9,47 @@ and reported only as a length.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
-from typing import Mapping
+from pathlib import Path
+from typing import Mapping, MutableMapping
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_EMBED_MODEL = "text-embedding-3-small"
 
 _FLAG_ON = {"1", "true", "yes", "on"}
+
+
+def repo_env_path() -> Path:
+    """The repository root's .env — the same file the TypeScript stack reads (ADR 0013)."""
+    return Path(__file__).resolve().parents[3] / ".env"
+
+
+def load_local_env(path: Path | None = None, target: MutableMapping[str, str] | None = None) -> None:
+    """Fill in what the target does not already have. The process environment wins, always.
+
+    The file is gitignored, and the key's value is never printed — this only moves it into an
+    environment the process already keeps private. Why a file at all: `setx` only reaches
+    terminals opened afterwards, and a person who sets a key and then reads "not set"
+    reasonably concludes the machine is broken.
+    """
+    file = path if path is not None else repo_env_path()
+    environ = target if target is not None else os.environ
+    if not file.is_file():
+        return
+    for raw in file.read_text(encoding="utf-8-sig").splitlines():
+        line = raw.strip()
+        if line == "" or line.startswith("#"):
+            continue
+        name, _, value = line.partition("=")
+        name = name.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None or value == "":
+            continue
+        if not environ.get(name):
+            environ[name] = value
 
 
 def env_flag(env: Mapping[str, str], name: str) -> bool:
@@ -61,7 +95,12 @@ def config_from_env(env: Mapping[str, str] | None = None) -> Config | None:
     Both a key AND a model are required, exactly as the terminal instructions have said all
     along — a key with no model is a machine that does not know what it would run.
     """
-    source = os.environ if env is None else env
+    if env is None:
+        # The repo's local .env first, so a key that lives there is found before anything asks.
+        load_local_env()
+        source: Mapping[str, str] = os.environ
+    else:
+        source = env
     api_key = (source.get("ATP_API_KEY") or source.get("OPENAI_API_KEY") or "").strip()
     model = (source.get("ATP_MODEL") or "").strip()
     if api_key == "" or model == "":

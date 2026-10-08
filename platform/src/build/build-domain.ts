@@ -9,6 +9,7 @@ import { SpendMeter } from "../providers/meter.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import { ask } from "../session/ask.ts";
 import { ReplyBudget } from "../session/retry.ts";
+import { loadRepoEnv } from "../util/local-env.ts";
 import { validateDraft } from "../validate/rules.ts";
 import type { Finding } from "../validate/types.ts";
 import type { DomainPlan, Pedagogy, SelectedPassage } from "./contracts.ts";
@@ -321,6 +322,8 @@ const STAGE_LABELS: Record<BuildStage, string> = {
 };
 
 async function main(): Promise<void> {
+  // The repo's local .env first: a key that lives there is found before anything asks for one.
+  loadRepoEnv();
   const topic = process.argv.slice(2).join(" ").trim();
   if (topic === "") {
     console.error('用法：npm run build-domain -- "<你想教的主题>"');

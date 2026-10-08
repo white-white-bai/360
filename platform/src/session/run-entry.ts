@@ -15,6 +15,7 @@ import { runApparatusSession } from "../session/apparatus.ts";
 import { misconceptionScript } from "../session/fixtures-apparatus.ts";
 import { MEANINGFUL_RETENTION_HOURS, measureFollowUp } from "../session/measure.ts";
 import { FileSessionStore } from "../session/store.ts";
+import { loadRepoEnv } from "../util/local-env.ts";
 
 /**
  * The way in, and the way back.
@@ -194,6 +195,8 @@ async function followUp(id: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  // The repo's local .env first: a key that lives there is found before anything asks for one.
+  loadRepoEnv();
   const argv = process.argv.slice(2);
 
   const followIndex = argv.indexOf("--followup");

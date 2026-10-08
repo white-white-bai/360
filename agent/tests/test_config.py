@@ -1,4 +1,4 @@
-from agent.config import DEFAULT_BASE_URL, DEFAULT_EMBED_MODEL, config_from_env
+from agent.config import DEFAULT_BASE_URL, DEFAULT_EMBED_MODEL, config_from_env, load_local_env
 
 
 def test_a_key_without_a_model_is_not_a_provider() -> None:
@@ -54,3 +54,18 @@ def test_the_zdr_header_rides_with_auth_when_on() -> None:
     plain = config_from_env({"ATP_API_KEY": "k", "ATP_MODEL": "m"})
     assert plain is not None
     assert "x-cmd-zdr" not in plain.auth_headers()
+
+
+def test_the_repo_env_file_is_read_and_the_process_wins(tmp_path) -> None:
+    file = tmp_path / ".env"
+    file.write_text('# comment\nATP_API_KEY="from-file"\nATP_MODEL=from-file\n', encoding="utf-8")
+    target = {"ATP_MODEL": "from-process"}
+    load_local_env(file, target)
+    assert target["ATP_MODEL"] == "from-process", "a variable the process has is not overwritten"
+    assert target["ATP_API_KEY"] == "from-file", "a variable it lacks is filled in"
+
+
+def test_a_missing_env_file_is_not_an_error(tmp_path) -> None:
+    target: dict[str, str] = {}
+    load_local_env(tmp_path / "nope" / ".env", target)
+    assert target == {}
