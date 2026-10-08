@@ -11,6 +11,14 @@ the graph's own steps — the answer appears as soon as it is written, and the v
 follows is visible while it happens. A page that shows progress is a page that can be trusted to
 still be working.
 
+Design pass (the design skill's `refine`, move: PUSH — product register, clarity over spectacle):
+the teacher's turns read as a lesson (prose on a ruled edge, generous measure, light-on-dark
+compensation) while the learner's turns are clearly inputs (compact, tinted, right-aligned); the
+verdict becomes the pane's headline; the ledger becomes a scannable table; the thread id — a
+secondary control nobody needs yet — moves behind disclosure; and the keyboard gets a focus ring
+you can actually see on this surface. The chat class names below are real tokens of the installed
+gradio bundle (bot-row, user-row, bubble, message-wrap, prose), checked there rather than guessed.
+
 Install with the extra: `pip install -e ".[ui]"`; run: `python -m agent.ui` (port 18089 by
 default, ATP_UI_PORT to change).
 """
@@ -25,11 +33,45 @@ from .console import utf8_console
 from .graph.graph import build_graph, fresh_turn
 from .model import ProviderError
 
-# The board's palette, so the two doors read as one product (platform/src/ui/index.html).
+# The board's palette, as tokens — the two doors read as one product
+# (platform/src/ui/index.html). The accent stays rare enough to mean something.
 CSS = """
+:root {
+  --chalk: #e9efe9; --dim: #9fb3aa; --accent: #f2d06b; --attention: #ef8a63; --ok: #9ed3a8;
+  --grid: #23372f; --panel: #12241e; --canvas: #0d1714;
+}
 .gradio-container { font-family: "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", serif; }
-#details-pane { font-size: 13px; line-height: 1.75; }
-#details-pane code { color: #f2d06b; }
+
+/* The lesson is the teacher's; the learner's words are inputs. Two voices, two shapes. */
+.chatbot .message-row.bot-row { border-left: 2px solid var(--grid); padding-left: 12px; }
+.chatbot .message-row.bot-row .bubble { background: transparent; border: 0; padding-left: 0; }
+.chatbot .message-row.user-row { justify-content: flex-end; }
+.chatbot .message-row.user-row .bubble {
+  background: #1c332c; color: var(--chalk); border: 1px solid var(--grid); max-width: 80%;
+}
+
+/* Reading rhythm for the answers: light-on-dark reads thinner, so more air and a trace of
+   tracking; the measure stays inside a comfortable line length. */
+.chatbot .bubble .prose { line-height: 1.8; letter-spacing: .01em; max-width: 70ch; }
+.chatbot .bubble .prose p { margin: .45em 0; }
+
+/* The right pane is a record, not prose: tight rhythm, tabular numbers, colour that carries
+   meaning only next to a glyph. */
+#details-pane { font-size: 13px; line-height: 1.7; }
+#details-pane h3 { margin: 0 0 6px; font-size: 14.5px; letter-spacing: .02em; color: var(--chalk); }
+#details-pane code { color: var(--accent); font-size: 12px; }
+#details-pane table { font-variant-numeric: tabular-nums; font-size: 12.5px; }
+#details-pane .ok { color: var(--ok); font-weight: 600; }
+#details-pane .no { color: var(--attention); font-weight: 600; }
+#details-pane .faint { color: var(--dim); }
+
+/* Keyboard: a ring you can see on a dark surface. */
+.gradio-container *:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+/* Motion explains state or it does not happen. */
+@media (prefers-reduced-motion: reduce) {
+  .gradio-container * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 """
 
 
@@ -57,52 +99,62 @@ def node_status(node: str, output: dict) -> str:
 
 
 def render_trail(trail: list[str], state: dict) -> str:
-    """While a turn runs: the steps so far, and nothing dressed up as a verdict."""
+    """While a turn runs: the steps so far, the newest one carrying the weight."""
+    steps = trail[-4:]
     lines = ["**进度**"]
-    lines.extend(f"- {item}" for item in trail[-4:])
+    for index, item in enumerate(steps):
+        lines.append(f"- **{item}**" if index == len(steps) - 1 else f"- {item}")
     if state.get("verified") is True:
         lines.append("")
-        lines.append("核对通过——正在收尾。")
+        lines.append('<span class="ok">核对通过</span>，正在收尾。')
     elif state.get("verified") is False:
         unsupported = len([item for item in state.get("verdicts", []) if not item.get("supported")])
         lines.append("")
-        lines.append(f"有 {unsupported} 条没有出处，老师正在按意见重写…")
+        lines.append(f'<span class="no">{unsupported} 条没有出处</span>，老师正在按意见重写…')
     return "\n".join(lines)
 
 
 def render_details(final: dict, ledger: Any) -> str:
-    """The pane beside the chat: verdicts, the challenger, the corpus, the ledger — in that order."""
+    """The pane beside the chat: the verdict leads, then the challenger, the corpus, the ledger."""
     lines: list[str] = []
 
     state = "通过" if final.get("verified") else ("未通过" if final.get("verified") is False else "未判定")
     verdicts = final.get("verdicts", [])
-    lines.append(f"**校验** · {state}（{len(verdicts)} 条断言）")
+    lines.append(f"### 校验 · {state}")
+    lines.append(f'<span class="faint">共核对 {len(verdicts)} 条断言。每条都必须有语料支持。</span>')
     for item in verdicts:
-        mark = "✓" if item.get("supported") else "✗"
+        mark = '<span class="ok">✓</span>' if item.get("supported") else '<span class="no">✗</span>'
         passage = item.get("passage") or "—"
         lines.append(f"- {mark} {item.get('claim', '')}  `[{passage}]`")
         if not item.get("supported") and item.get("reason"):
-            lines.append(f"  - 理由：{item['reason']}")
+            lines.append(f'  - <span class="faint">理由：{item["reason"]}</span>')
     if final.get("verify_note"):
-        lines.append(f"- （{final['verify_note']}）")
+        lines.append(f'- <span class="faint">（{final["verify_note"]}）</span>')
 
     if final.get("challenge"):
-        lines.append("\n**质疑者**")
+        lines.append("\n### 质疑者")
         lines.append(str(final["challenge"]))
 
     ids = sorted({str(hit.get("id", "")) for hit in final.get("hits", [])})
-    lines.append(f"\n**语料** · {len(final.get('hits', []))} 段")
+    lines.append(f"\n### 语料 · {len(final.get('hits', []))} 段")
     lines.append("`" + ("`, `".join(ids) if ids else "没有检索到") + "`")
 
     if ledger is not None and ledger.rows():
-        lines.append("\n**账本**")
+        lines.append("\n### 账本")
+        lines.append("| actor | 调用 | tokens | 花费 |")
+        lines.append("| --- | --- | --- | --- |")
         for row in ledger.rows():
-            marker = "" if row.priced else "（价表未知）"
-            lines.append(
-                f"- {row.actor} · {row.calls} 次 · {row.input_tokens}+{row.output_tokens} tok · "
-                f"${row.cost_usd:.4f}{marker}"
-            )
+            cost = f"${row.cost_usd:.4f}" + ("" if row.priced else " （价表未知）")
+            lines.append(f"| {row.actor} | {row.calls} | {row.input_tokens}+{row.output_tokens} | {cost} |")
     return "\n".join(lines)
+
+
+EMPTY_PANE = (
+    "### 还没有开始\n"
+    "说一句，或者点下面任意一个问题试试。\n\n"
+    '<span class="faint">grounded：先在语料里检索，回答写完后由另一位 actor 逐条核对'
+    "每条断言有没有出处——结果与花费都会出现在这里。</span>"
+)
 
 
 def make_handler(agent_factory: Callable[[], tuple[Any, Any]]):
@@ -172,49 +224,69 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
         primary_hue=gr.themes.colors.yellow,
         neutral_hue=gr.themes.colors.green,
     ).set(
-        body_background_fill="#101a17",
-        body_text_color="#eef3ee",
+        body_background_fill="#0d1714",
+        body_text_color="#e9efe9",
+        body_text_size="15px",
+        background_fill_primary="#12241e",
+        background_fill_secondary="#0e1a17",
         block_background_fill="#12241e",
         block_border_color="#23372f",
+        block_label_background_fill="#12241e",
         block_label_text_color="#9fb3aa",
+        block_title_text_color="#9fb3aa",
+        border_color_primary="#23372f",
         input_background_fill="#0e1a17",
+        input_border_color="#2c4a42",
+        input_border_color_focus="#f2d06b",
         button_primary_background_fill="#f2d06b",
         button_primary_text_color="#1b2f28",
+        button_primary_background_fill_hover="#e7c356",
+        button_secondary_background_fill="#1c332c",
+        button_secondary_text_color="#e9efe9",
     )
 
     with gr.Blocks(title="教学平台 · agent", theme=theme, css=CSS) as demo:
         gr.Markdown(
-            "### agent 课堂\n"
-            "**grounded** 先从语料里检索，再回答，然后由另一位 actor 逐条核对有没有出处；"
-            "**chat** 是直接课堂（ADR 0011），不检索、不判定。"
+            "## agent 课堂\n"
+            '<span class="faint" style="color:#9fb3aa">同一个图，换一双眼睛。'
+            "grounded 先检索再回答、逐条核对；chat 是直接课堂（ADR 0011），不检索、不判定。</span>"
         )
         with gr.Row():
             with gr.Column(scale=3):
                 history = gr.Chatbot(
                     label="课堂",
-                    height=460,
+                    height=470,
                     placeholder="说点什么开始——比如「时区为什么会出现缺口」",
                 )
-                message = gr.Textbox(
-                    label="你的话",
-                    lines=2,
-                    show_label=False,
-                    placeholder="用你自己的话说说，或直接问…（Enter 发送）",
-                )
                 with gr.Row():
-                    mode = gr.Radio(["grounded", "chat"], value="grounded", label="模式", scale=3)
-                    thread = gr.Textbox(label="会话 id", value="ui", scale=2)
-                    send = gr.Button("发送", variant="primary", scale=1)
+                    message = gr.Textbox(
+                        label="你的话",
+                        lines=2,
+                        scale=5,
+                        placeholder="用你自己的话说说，或直接问……（Enter 发送）",
+                    )
+                    send = gr.Button("发送", variant="primary", size="lg", scale=1)
+                with gr.Row():
+                    mode = gr.Radio(
+                        ["grounded", "chat"],
+                        value="grounded",
+                        label="模式",
+                        scale=3,
+                        info="grounded：先检索、再回答、另一位 actor 逐条核对；chat：直接课堂，无校验。",
+                    )
+                    with gr.Accordion("续上一次（会话 id）", open=False):
+                        thread = gr.Textbox(
+                            show_label=False,
+                            value="ui",
+                            placeholder="换一个名字就是新开一节",
+                        )
                 gr.Examples(
                     ["时区为什么会出现缺口", "MCP 的工具描述可以直接信任吗", "夏令时最早是哪个国家发明的"],
                     inputs=message,
-                    label="试试",
+                    label="试试这些",
                 )
             with gr.Column(scale=2):
-                details = gr.Markdown(
-                    "**校验 · 质疑者 · 账本**\n\n还没有开始。grounded 模式下，回答写完后由另一位 actor 逐条核对。",
-                    elem_id="details-pane",
-                )
+                details = gr.Markdown(EMPTY_PANE, elem_id="details-pane")
         send.click(handle, [message, mode, thread, history], [history, message, details])
         message.submit(handle, [message, mode, thread, history], [history, message, details])
     return demo
