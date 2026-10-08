@@ -39,6 +39,9 @@ dependencies = [
 # opentelemetry and gradio in stage 4. A dependency nothing runs yet is a dependency nobody
 # understands.
 dev = ["pytest>=8.2", "pytest-asyncio>=0.24"]
+# The product section's prototype surface, an extra on purpose: gradio is imported only when the
+# page is built, so neither the tests nor the CLI pay for it.
+ui = ["gradio>=4.44"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent"]

@@ -15,7 +15,7 @@ built one stage at a time. It shares the knowledge assets with the TypeScript pl
 | 开发框架与工具栈 | Stage 0 起陆续落地（FastAPI ✓；LangGraph ✓ Stage 2；fastmcp ✓ Stage 3；OTel ✓ Stage 4；Gradio 未落地） |
 | FineTuning | **未落地**：本机 GPU 是 GT 710，不是推理卡，且无数据无必要 |
 | 多模态与视觉 | **未落地**：PDF/OCR 解析列为后续可选工具 |
-| 产品 | **未落地（这一刀）**：终端与 HTTP 门已够用；Gradio 原型列为可选 |
+| 产品 | Stage 3 ✓（Gradio 原型；Copilot/Agent 的模式映射就是 chat/grounded 两种模式） |
 | 交付 | Stage 4 ✓（compose：agent + board 两服务，可选 OTel collector；K8s 清单与 vLLM 文档明确标记"未验证"） |
 
 ## Run
@@ -26,6 +26,8 @@ python -m venv .venv
 .venv\Scripts\python -m pytest
 .venv\Scripts\python -m agent.probe        # chat + embeddings，各一次最小请求
 probe.cmd                                  # 同上，但不用记 venv 路径（Windows）
+.venv\Scripts\pip install -e ".[ui]"       # 可选：Gradio 原型页
+.venv\Scripts\python -m agent.ui           # → http://127.0.0.1:18089
 .venv\Scripts\uvicorn agent.app:app --port 18088   # then GET /health
 ```
 
