@@ -5,19 +5,16 @@ enough that it never becomes the product. It reuses the same graph as every othe
 agent, several interfaces — and the turn handler is a generator, so the tests exercise a whole
 turn with a scripted model and no browser (gradio is imported only when the page is built).
 
-The page's real job, beyond looking like the product it belongs to, is to NOT look frozen: a
-grounded turn takes tens of seconds (search, answer, verify, challenge), so the handler streams
-the graph's own steps — the answer appears as soon as it is written, and the verification that
-follows is visible while it happens. A page that shows progress is a page that can be trusted to
-still be working.
+The transcript is OURS, not gradio's Chatbot. Two screenshots of the Chatbot's dark-mode
+rendering disagreed with the served configuration in ways only a browser could settle — the
+greeting rendered as a giant empty bubble (its light fill against chalk text), and the panel
+layout did not remove it. Rather than iterate blind against a component whose art we do not
+control, the transcript is a Markdown block we render ourselves, in the board's own narration
+shape: a small actor label, prose on a ruled edge for the teacher, a tinted quoted block for the
+learner. Every visible pixel is then a decision in this file.
 
-Design pass (the design skill's `refine`, move: PUSH — product register, clarity over spectacle):
-the teacher's turns read as a lesson (prose on a ruled edge, generous measure, light-on-dark
-compensation) while the learner's turns are clearly inputs (compact, tinted, right-aligned); the
-verdict becomes the pane's headline; the ledger becomes a scannable table; the thread id — a
-secondary control nobody needs yet — moves behind disclosure; and the keyboard gets a focus ring
-you can actually see on this surface. The chat class names below are real tokens of the installed
-gradio bundle (bot-row, user-row, bubble, message-wrap, prose), checked there rather than guessed.
+The handler streams the graph's steps, because a grounded turn takes tens of seconds: the answer
+appears as soon as it is written, the verification that follows is watched while it happens.
 
 Install with the extra: `pip install -e ".[ui]"`; run: `python -m agent.ui` (port 18089 by
 default, ATP_UI_PORT to change).
@@ -25,6 +22,7 @@ default, ATP_UI_PORT to change).
 
 from __future__ import annotations
 
+import html
 import os
 import sys
 from typing import Any, Callable
@@ -42,8 +40,8 @@ CSS = """
 }
 .gradio-container { font-family: "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", serif; }
 
-/* Deterministic layer. The theme tokens do the work; these few rules make the page readable
-   even if a token is ignored by this gradio version or the browser's colour mode disagrees. */
+/* Deterministic layer: the theme tokens do the work, and these rules keep the page readable
+   even where this gradio version ignores a token or the browser's colour mode disagrees. */
 .gradio-container, .gradio-container .main { background: var(--canvas) !important; color: var(--chalk); }
 .gradio-container .block { background: var(--panel) !important; border-color: var(--grid) !important; }
 .gradio-container .prose, .gradio-container .prose * { color: var(--chalk); }
@@ -52,24 +50,20 @@ CSS = """
   background: #0e1a17 !important; color: var(--chalk) !important; border-color: #2c4a42 !important;
 }
 
-/* The lesson is the teacher's; the learner's words are inputs. Two voices, two shapes.
-   All chat surfaces are forced transparent first: gradio's default bubble is a LIGHT fill, and
-   chalk text on it is invisible — which is exactly how a greeting rendered as a giant empty
-   bubble (the first screenshot's "placeholder illustration" was the greeting, white on white). */
-.chatbot .message-row, .chatbot .bubble, .chatbot .message {
-  background: transparent !important; border-color: transparent !important;
+/* The transcript, in the board's narration shape: an actor label, prose on a ruled edge for the
+   teacher, a tinted block for the learner. Light-on-dark reads thinner, so more air and a trace
+   of tracking; the measure stays inside a comfortable line length. */
+#transcript { max-height: 58vh; overflow-y: auto; padding-right: 8px; font-size: 15px; }
+#transcript .turn { margin: 0 0 20px; }
+#transcript .turn .who { font-size: 11px; letter-spacing: .14em; color: var(--dim); margin-bottom: 4px; }
+#transcript .turn.teacher { border-left: 2px solid var(--grid); padding-left: 14px; }
+#transcript .turn.teacher .said { line-height: 1.85; letter-spacing: .01em; max-width: 70ch; }
+#transcript .turn.teacher .said p { margin: .45em 0; }
+#transcript .turn.learner { text-align: right; }
+#transcript .turn.learner .said {
+  display: inline-block; text-align: left; background: #1c332c; border: 1px solid var(--grid);
+  border-radius: 6px; padding: 8px 12px; max-width: 80%; line-height: 1.7;
 }
-.chatbot .message-row.bot-row { border-left: 2px solid var(--grid) !important; padding-left: 12px; }
-.chatbot .message-row.user-row { justify-content: flex-end; }
-.chatbot .message-row.user-row .bubble {
-  background: #1c332c !important; color: var(--chalk) !important;
-  border: 1px solid var(--grid) !important; max-width: 80%;
-}
-
-/* Reading rhythm for the answers: light-on-dark reads thinner, so more air and a trace of
-   tracking; the measure stays inside a comfortable line length. */
-.chatbot .bubble .prose { line-height: 1.8; letter-spacing: .01em; max-width: 70ch; }
-.chatbot .bubble .prose p { margin: .45em 0; }
 
 /* The right pane is a record, not prose: tight rhythm, tabular numbers, colour that carries
    meaning only next to a glyph. */
@@ -91,8 +85,8 @@ CSS = """
 """
 
 # The same values for both colour modes: the browser's preference must not decide whether the
-# board is readable. The first build of this page set only the light-mode tokens, so a dark-mode
-# browser got dark canvas + light blocks + near-invisible header text.
+# board is readable. The first build set only the light-mode tokens, so a dark-mode browser got a
+# dark canvas, light blocks and a header nobody could read.
 _TOKENS = {
     "body_background_fill": "#0d1714",
     "body_text_color": "#e9efe9",
@@ -115,8 +109,7 @@ _TOKENS = {
     "button_secondary_text_color": "#e9efe9",
 }
 
-# Forced dark, so gradio's own chrome (scrollbars, focus rings, the chat illustration's colours)
-# agrees with the surface instead of following the OS.
+# `head` belongs to launch(), not Blocks: Blocks accepts the kwarg silently and serves nothing.
 HEAD = "<script>document.documentElement.classList.add('dark')</script>"
 
 GREETING = (
@@ -124,6 +117,25 @@ GREETING = (
     "回答写完后由另一位 actor 逐条核对每条断言有没有出处，结果在右边。\n\n"
     "也可以切到 **chat**：直接课堂，不检索、不判定。开始吧，比如「时区为什么会出现缺口」。"
 )
+
+GREETING_TURNS = [{"role": "assistant", "content": GREETING}]
+
+
+def render_transcript(turns: list[dict]) -> str:
+    """The whole conversation, in the board's narration shape.
+
+    The teacher's turns are model markdown and render as markdown; the learner's are their own
+    words and must render as TEXT — a learner who types `<b>` gets to see `<b>`.
+    """
+    blocks: list[str] = []
+    for turn in turns:
+        content = str(turn.get("content", ""))
+        if turn.get("role") == "user":
+            safe = html.escape(content).replace("\n", "<br>")
+            blocks.append(f'<div class="turn learner"><div class="who">你</div><div class="said">{safe}</div></div>')
+        else:
+            blocks.append(f'<div class="turn teacher"><div class="who">主讲</div><div class="said">{content}</div></div>')
+    return "\n".join(blocks)
 
 
 def build_agent() -> tuple[Any, Any]:
@@ -209,16 +221,16 @@ EMPTY_PANE = (
 
 
 def make_handler(agent_factory: Callable[[], tuple[Any, Any]]):
-    """The turn handler as a generator over the graph's steps — the whole Gradio integration surface.
+    """The turn handler as a generator over the graph's steps.
 
-    History is the messages format (a list of `{"role", "content"}` dicts): tuples were removed
-    from Gradio's Chatbot, and the messages shape is the one the component is going to keep.
+    Inputs: the message, the mode, the thread id, and the turn list (gradio State). Outputs: the
+    rendered transcript, the cleared input, the details pane, and the updated turn list.
     """
 
-    def handle(message: str, mode: str, thread: str, history: list | None):
-        turns = list(history or [])
+    def handle(message: str, mode: str, thread: str, turns: list | None):
+        turns = list(turns or [])
         if message.strip() == "":
-            yield turns, "", ""
+            yield render_transcript(turns), "", "", turns
             return
         turns.append({"role": "user", "content": message})
 
@@ -226,7 +238,7 @@ def make_handler(agent_factory: Callable[[], tuple[Any, Any]]):
             agent, ledger = agent_factory()
         except Exception as error:  # NoProvider included — said, not crashed
             turns.append({"role": "assistant", "content": f"（没做成：{error}）"})
-            yield turns, "", ""
+            yield render_transcript(turns), "", "", turns
             return
 
         trail: list[str] = []
@@ -246,23 +258,23 @@ def make_handler(agent_factory: Callable[[], tuple[Any, Any]]):
                     if note != "":
                         trail.append(note)
                     if node == "lead" and output.get("answer") and not answered:
-                        # The answer lands in the chat as soon as it is written; the verification
-                        # below it is then watched, not waited for.
+                        # The answer lands in the transcript as soon as it is written; the
+                        # verification below it is then watched, not waited for.
                         turns.append({"role": "assistant", "content": output["answer"]})
                         answered = True
-                    yield turns, "", render_trail(trail, state)
+                    yield render_transcript(turns), "", render_trail(trail, state), turns
         except ProviderError as error:
             turns.append({"role": "assistant", "content": f"（provider 出错：{error}）"})
-            yield turns, "", render_trail(trail, state)
+            yield render_transcript(turns), "", render_trail(trail, state), turns
             return
         except Exception as error:
             turns.append({"role": "assistant", "content": f"（没做成：{error}）"})
-            yield turns, "", render_trail(trail, state)
+            yield render_transcript(turns), "", render_trail(trail, state), turns
             return
 
         if not answered:
             turns.append({"role": "assistant", "content": state.get("answer") or "（没有回答）"})
-        yield turns, "", render_details(state, ledger)
+        yield render_transcript(turns), "", render_details(state, ledger), turns
 
     return handle
 
@@ -296,15 +308,8 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
         )
         with gr.Row():
             with gr.Column(scale=3):
-                history = gr.Chatbot(
-                    value=[{"role": "assistant", "content": GREETING}],
-                    label="课堂",
-                    height=400,
-                    # Panel, not bubble: gradio 6's bubble layout wraps each message in its own
-                    # light-filled shape, which fights a dark teaching surface — and the teacher's
-                    # turn is prose, not a speech balloon.
-                    layout="panel",
-                )
+                transcript = gr.Markdown(render_transcript(GREETING_TURNS), elem_id="transcript")
+                turns = gr.State(list(GREETING_TURNS))
                 with gr.Row():
                     message = gr.Textbox(
                         label="你的话",
@@ -334,16 +339,16 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
                 )
             with gr.Column(scale=2):
                 details = gr.Markdown(EMPTY_PANE, elem_id="details-pane")
-        send.click(handle, [message, mode, thread, history], [history, message, details])
-        message.submit(handle, [message, mode, thread, history], [history, message, details])
+        outputs = [transcript, message, details, turns]
+        inputs = [message, mode, thread, turns]
+        send.click(handle, inputs, outputs)
+        message.submit(handle, inputs, outputs)
     return demo
 
 
 def main() -> int:
     utf8_console()
     port = int(os.environ.get("ATP_UI_PORT", "18089"))
-    # `head` belongs to launch(), not Blocks — Blocks accepted it silently and served nothing,
-    # which is how a "forced dark mode" turned out to be a no-op (checked in the served HTML).
     build_ui().launch(server_name="127.0.0.1", server_port=port, head=HEAD)
     return 0
 

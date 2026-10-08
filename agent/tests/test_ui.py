@@ -7,7 +7,7 @@ from agent.model import ModelReply, ScriptedModel, ToolCall
 from agent.rag.assets import Passage
 from agent.rag.store import Hit
 from agent.tools import Toolbox
-from agent.ui import make_handler, render_details
+from agent.ui import make_handler, render_details, render_transcript
 
 
 class StubRetriever:
@@ -54,6 +54,18 @@ def test_the_details_pane_says_what_happened(tmp_path: Path) -> None:
     assert "账本" in text
 
 
+def test_the_transcript_labels_both_voices_and_keeps_the_learner_s_words_as_text() -> None:
+    text = render_transcript(
+        [
+            {"role": "assistant", "content": "**要点**"},
+            {"role": "user", "content": "<b>不是这样的</b>"},
+        ]
+    )
+    assert "主讲" in text and "你" in text
+    assert "**要点**" in text, "the teacher's markdown stays markdown"
+    assert "&lt;b&gt;" in text and "<b>" not in text, "a learner who types html gets to see html"
+
+
 def test_the_handler_streams_the_turn_instead_of_freezing_on_it(tmp_path: Path) -> None:
     calls = {"n": 0}
 
@@ -65,15 +77,16 @@ def test_the_handler_streams_the_turn_instead_of_freezing_on_it(tmp_path: Path) 
     events = list(handle("时区为什么有缺口", "grounded", "t1", []))
 
     assert calls["n"] == 1
-    history, cleared, details = events[-1]
-    assert history[0] == {"role": "user", "content": "时区为什么有缺口"}
-    assert "缺口" in history[1]["content"]
+    transcript, cleared, details, turns = events[-1]
+    assert "缺口" in transcript, "the answer is in the transcript"
+    assert 'class="turn learner"' in transcript and "时区为什么有缺口" in transcript
     assert cleared == ""
     assert "校验" in details and "通过" in details
+    assert "缺口" in turns[-1]["content"], "and the turn list carries the conversation forward"
 
     # The point of the generator: a grounded turn takes tens of seconds, and the page shows the
     # steps as they happen rather than looking frozen for the whole minute.
-    progress = [details for _, _, details in events[:-1]]
+    progress = [event[2] for event in events[:-1]]
     assert any("进度" in item for item in progress), "progress is streamed, not just the ending"
     assert any("检索完成" in item for item in progress), "the search step is visible while it runs"
 
@@ -83,13 +96,13 @@ def test_the_handler_survives_a_broken_factory_and_an_empty_message(tmp_path: Pa
         raise RuntimeError("没有配置 provider")
 
     handle = make_handler(refusing)
-    history, _, _ = list(handle("你好", "grounded", "t", []))[-1]
-    assert "没做成" in history[1]["content"], "a failure is a turn the learner can read, not a stack trace"
+    transcript, _, _, _ = list(handle("你好", "grounded", "t", []))[-1]
+    assert "没做成" in transcript, "a failure is a turn the learner can read, not a stack trace"
 
     events = list(handle("   ", "grounded", "t", []))
     assert len(events) == 1
-    history, cleared, details = events[0]
-    assert history == [] and cleared == "" and details == ""
+    transcript, cleared, details, turns = events[0]
+    assert transcript == "" and cleared == "" and details == "" and turns == []
 
 
 def test_an_undecided_turn_says_so() -> None:
