@@ -78,11 +78,12 @@ CSS = """
 /* Keyboard: a ring you can see on a dark surface. */
 .gradio-container *:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
 
-/* The two panes sit side by side at desktop widths: gradio's responsive collapse had fired on
-   a ~1900px window (the transcript and the record stacked), so the row is forced to stay a row
-   and its columns to shrink rather than wrap. */
-.gradio-container .row { flex-wrap: nowrap !important; align-items: flex-start !important; }
-.gradio-container .row > .column { min-width: 0 !important; }
+/* The two panes sit side by side at desktop widths. Gradio's own row/column classes did not
+   respond to being forced (the previous rule changed nothing on a ~1900px window), so the
+   outer row gets OUR id and becomes a grid: one mechanism, on a hook we control. */
+#main-row { display: grid !important; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) !important; gap: 20px; }
+#main-row > * { width: auto !important; min-width: 0 !important; }
+@media (max-width: 900px) { #main-row { grid-template-columns: 1fr !important; } }
 
 /* Motion explains state or it does not happen. */
 @media (prefers-reduced-motion: reduce) {
@@ -317,7 +318,7 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
             '<span class="faint" style="color:#9fb3aa">同一个图，换一双眼睛。'
             "grounded 先检索再回答、逐条核对；chat 是直接课堂（ADR 0011），不检索、不判定。</span>"
         )
-        with gr.Row():
+        with gr.Row(elem_id="main-row"):
             with gr.Column(scale=3):
                 transcript = gr.Markdown(render_transcript(GREETING_TURNS), elem_id="transcript")
                 turns = gr.State(list(GREETING_TURNS))
