@@ -42,6 +42,16 @@ CSS = """
 }
 .gradio-container { font-family: "Iowan Old Style", "Songti SC", "Noto Serif CJK SC", serif; }
 
+/* Deterministic layer. The theme tokens do the work; these few rules make the page readable
+   even if a token is ignored by this gradio version or the browser's colour mode disagrees. */
+.gradio-container, .gradio-container .main { background: var(--canvas) !important; color: var(--chalk); }
+.gradio-container .block { background: var(--panel) !important; border-color: var(--grid) !important; }
+.gradio-container .prose, .gradio-container .prose * { color: var(--chalk); }
+.gradio-container button.primary { background: var(--accent) !important; color: #1b2f28 !important; border: 0 !important; }
+.gradio-container input, .gradio-container textarea {
+  background: #0e1a17 !important; color: var(--chalk) !important; border-color: #2c4a42 !important;
+}
+
 /* The lesson is the teacher's; the learner's words are inputs. Two voices, two shapes. */
 .chatbot .message-row.bot-row { border-left: 2px solid var(--grid); padding-left: 12px; }
 .chatbot .message-row.bot-row .bubble { background: transparent; border: 0; padding-left: 0; }
@@ -73,6 +83,41 @@ CSS = """
   .gradio-container * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
 """
+
+# The same values for both colour modes: the browser's preference must not decide whether the
+# board is readable. The first build of this page set only the light-mode tokens, so a dark-mode
+# browser got dark canvas + light blocks + near-invisible header text.
+_TOKENS = {
+    "body_background_fill": "#0d1714",
+    "body_text_color": "#e9efe9",
+    "body_text_size": "15px",
+    "background_fill_primary": "#12241e",
+    "background_fill_secondary": "#0e1a17",
+    "block_background_fill": "#12241e",
+    "block_border_color": "#23372f",
+    "block_label_background_fill": "#12241e",
+    "block_label_text_color": "#9fb3aa",
+    "block_title_text_color": "#9fb3aa",
+    "border_color_primary": "#23372f",
+    "input_background_fill": "#0e1a17",
+    "input_border_color": "#2c4a42",
+    "input_border_color_focus": "#f2d06b",
+    "button_primary_background_fill": "#f2d06b",
+    "button_primary_text_color": "#1b2f28",
+    "button_primary_background_fill_hover": "#e7c356",
+    "button_secondary_background_fill": "#1c332c",
+    "button_secondary_text_color": "#e9efe9",
+}
+
+# Forced dark, so gradio's own chrome (scrollbars, focus rings, the chat illustration's colours)
+# agrees with the surface instead of following the OS.
+HEAD = "<script>document.documentElement.classList.add('dark')</script>"
+
+GREETING = (
+    "你好。这里是 **grounded** 模式：先在已签字的语料里检索，再回答；"
+    "回答写完后由另一位 actor 逐条核对每条断言有没有出处，结果在右边。\n\n"
+    "也可以切到 **chat**：直接课堂，不检索、不判定。开始吧，比如「时区为什么会出现缺口」。"
+)
 
 
 def build_agent() -> tuple[Any, Any]:
@@ -217,34 +262,26 @@ def make_handler(agent_factory: Callable[[], tuple[Any, Any]]):
 
 
 def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
+    import inspect
+
     import gradio as gr  # imported here: the tests never need it, and neither does the CLI
 
-    handle = make_handler(agent_factory or build_agent)
+    # Both colour modes get the same values, and only the variants this gradio version actually
+    # accepts are passed — checked against the installed signature rather than assumed, which is
+    # how the previous pass's one wrong token name (input_border_color_primary) got caught.
+    accepted = set(inspect.signature(gr.themes.Base().set).parameters)
+    tokens = {
+        f"{name}{suffix}": value
+        for name, value in _TOKENS.items()
+        for suffix in ("", "_dark")
+        if f"{name}{suffix}" in accepted
+    }
     theme = gr.themes.Base(
         primary_hue=gr.themes.colors.yellow,
         neutral_hue=gr.themes.colors.green,
-    ).set(
-        body_background_fill="#0d1714",
-        body_text_color="#e9efe9",
-        body_text_size="15px",
-        background_fill_primary="#12241e",
-        background_fill_secondary="#0e1a17",
-        block_background_fill="#12241e",
-        block_border_color="#23372f",
-        block_label_background_fill="#12241e",
-        block_label_text_color="#9fb3aa",
-        block_title_text_color="#9fb3aa",
-        border_color_primary="#23372f",
-        input_background_fill="#0e1a17",
-        input_border_color="#2c4a42",
-        input_border_color_focus="#f2d06b",
-        button_primary_background_fill="#f2d06b",
-        button_primary_text_color="#1b2f28",
-        button_primary_background_fill_hover="#e7c356",
-        button_secondary_background_fill="#1c332c",
-        button_secondary_text_color="#e9efe9",
-    )
+    ).set(**tokens)
 
+    handle = make_handler(agent_factory or build_agent)
     with gr.Blocks(title="教学平台 · agent", theme=theme, css=CSS) as demo:
         gr.Markdown(
             "## agent 课堂\n"
@@ -254,9 +291,9 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
         with gr.Row():
             with gr.Column(scale=3):
                 history = gr.Chatbot(
+                    value=[{"role": "assistant", "content": GREETING}],
                     label="课堂",
-                    height=470,
-                    placeholder="说点什么开始——比如「时区为什么会出现缺口」",
+                    height=400,
                 )
                 with gr.Row():
                     message = gr.Textbox(
@@ -295,7 +332,9 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
 def main() -> int:
     utf8_console()
     port = int(os.environ.get("ATP_UI_PORT", "18089"))
-    build_ui().launch(server_name="127.0.0.1", server_port=port)
+    # `head` belongs to launch(), not Blocks — Blocks accepted it silently and served nothing,
+    # which is how a "forced dark mode" turned out to be a no-op (checked in the served HTML).
+    build_ui().launch(server_name="127.0.0.1", server_port=port, head=HEAD)
     return 0
 
 
