@@ -11,6 +11,13 @@ dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
   "httpx>=0.27",
+  # Stage 1 (RAG): FAISS for meaning, BM25 for words, numpy under both. The local embedder is
+  # fastembed (ONNX, no API key): the provider this project uses has no /embeddings route, and a
+  # retrieval stage that cannot run on the owner's machine is a diagram, not a stage.
+  "numpy>=1.26",
+  "faiss-cpu>=1.8",
+  "rank-bm25>=0.2",
+  "fastembed>=0.4",
 ]
 
 [project.optional-dependencies]

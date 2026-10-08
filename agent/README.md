@@ -10,7 +10,7 @@ built one stage at a time. It shares the knowledge assets with the TypeScript pl
 | --- | --- |
 | Prompt 与 Context | Stage 2 |
 | Vibe Coding | 保持（仓库自身的开发方式） |
-| RAG | Stage 1 |
+| RAG | Stage 1 ✓（段落级检索：本地多语 embedder + FAISS + BM25 + RRF + LLM 重排；golden hits@K 5/5） |
 | Agent 智能体 | Stage 2–3 |
 | 开发框架与工具栈 | Stage 0 起陆续落地（FastAPI ✓ 现在；LangGraph Stage 2；fastmcp Stage 3；Gradio/OTel Stage 4） |
 | FineTuning | **未落地**：本机 GPU 是 GT 710，不是推理卡，且无数据无必要 |
@@ -66,6 +66,26 @@ That file is the key's home on a machine — never a tracked source file: `setx`
 terminals opened afterwards, and a key written into code is a key in git history waiting to
 happen.
 
-Two things this provider does not give the later stages: **no embeddings endpoint** (stage 1's
-RAG needs another source or the local fallback), and **Claude models answer on `/messages`
-only** — that is the platform's Anthropic adapter's job, not this service's.
+Two things this provider does not give the later stages: **no embeddings endpoint** (stage 1 resolved this with the local embedder below), and **Claude models answer on `/messages` only** — that is the platform's Anthropic adapter's job, not this service's.
+
+## Retrieval (stage 1)
+
+```bash
+.venv\Scripts\python -m agent.search "时区是怎么定义的" --k 3    # hybrid + LLM rerank
+.venv\Scripts\python -m agent.search "…" --no-rerank            # fused order only
+.venv\Scripts\python -m agent.search "…" --no-vector            # BM25 only — needs no model
+.venv\Scripts\python evals\retrieval.py                         # golden queries, hits@K
+```
+
+- **The unit is the passage with its citation** — id, source, URL, and (for built Domains) the
+  sha256 and fetch date. A hit without provenance is a sentence, not evidence.
+- **Embedder backends** (`ATP_EMBED_BACKEND`): `local` (default; fastembed ONNX multilingual, no
+  API key), `openai` (any OpenAI-compatible `/embeddings` via `ATP_EMBED_BASE_URL`), `fake`
+  (tests). The model downloads once; on a network that cannot reach huggingface.co, set
+  `HF_ENDPOINT=https://hf-mirror.com` first.
+- **A half with no signal gets no vote.** BM25 over a Chinese query against English passages
+  scores all zeros, and an arbitrary ranking of zeros used to outweigh the half that matched —
+  pinned as a test, because it happened.
+- **The rerank earns its place**: the hybrid alone put two golden targets at rank 9 and 15 —
+  inside the pool, outside any k worth returning. If the rerank cannot happen, the fused order
+  stands and the CLI says so.
