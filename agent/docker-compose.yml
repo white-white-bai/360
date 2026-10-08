@@ -22,9 +22,14 @@ services:
         required: false
     environment:
       ATP_DOMAINS_DIR: /domains
+      ATP_SESSIONS_DIR: /sessions
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     volumes:
       - ../domains:/domains:ro
+      # The learner's own records, read-only on purpose: the classroom may REMEMBER, and the
+      # memory module's whole stance is that it never writes — a conversation is not a
+      # measurement, and the retention numbers mean what they mean because the flow owns them.
+      - ../platform/.sessions:/sessions:ro
       - agent-state:/app/.state
 
   board:

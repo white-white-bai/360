@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..config import Config
+from ..memory import learner_brief
 from ..rag.assets import parse_meta
 from ..rag.rerank import POOL, RerankError, llm_rerank
 from ..rag.store import Retriever
@@ -57,6 +58,20 @@ _TOOL_SCHEMAS: list[dict] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "recall_learner",
+            "description": (
+                "读这位学习者自己的课堂记录：上过哪些课、问过什么（以及哪些被拒答）、"
+                "课后的复习与迁移测量结果。当学习者提到「上次/以前」，或你想知道他们的薄弱点时用它。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"limit": {"type": "integer", "description": "最多读几条，默认 3"}},
+            },
+        },
+    },
 ]
 
 
@@ -72,6 +87,9 @@ class Toolbox:
     retriever: Retriever
     domains_dir: Path
     rerank_config: Config | None = None
+    # Where the learner's own session records live (the TypeScript platform writes them); None
+    # means the memory tool answers "no records", which is the honest shape for a fresh machine.
+    sessions_dir: Path | None = None
 
     def search_corpus(self, query: str) -> str:
         pool = self.retriever.search(query, k=POOL)
@@ -118,6 +136,9 @@ class Toolbox:
                 return self.list_catalogue()
             if name == "read_domain":
                 return self.read_domain(str(arguments.get("domain", "")).strip())
+            if name == "recall_learner":
+                limit = arguments.get("limit")
+                return learner_brief(self.sessions_dir, limit if isinstance(limit, int) and limit > 0 else 3)
             return json.dumps({"error": f"no tool named {name}"}, ensure_ascii=False)
 
     @staticmethod

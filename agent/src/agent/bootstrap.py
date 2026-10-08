@@ -13,7 +13,7 @@ from pathlib import Path
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from .app import domains_dir
+from .app import domains_dir, sessions_dir
 from .config import Config, config_from_env
 from .ledger import Ledger
 from .model import ProviderModel
@@ -39,7 +39,12 @@ def cached_toolbox() -> Toolbox:
     """
     config = config_from_env()
     retriever = Retriever(load_passages(domains_dir()), embedder_from_env())
-    return Toolbox(retriever=retriever, domains_dir=domains_dir(), rerank_config=config)
+    return Toolbox(
+        retriever=retriever,
+        domains_dir=domains_dir(),
+        rerank_config=config,
+        sessions_dir=sessions_dir(),
+    )
 
 
 def live_stack(*, rerank: bool = True) -> tuple[Config, Ledger, ProviderModel, Toolbox]:
@@ -54,7 +59,12 @@ def live_stack(*, rerank: bool = True) -> tuple[Config, Ledger, ProviderModel, T
     model = ProviderModel(config, ledger)
     toolbox = cached_toolbox()
     if not rerank:
-        toolbox = Toolbox(retriever=toolbox.retriever, domains_dir=toolbox.domains_dir, rerank_config=None)
+        toolbox = Toolbox(
+            retriever=toolbox.retriever,
+            domains_dir=toolbox.domains_dir,
+            rerank_config=None,
+            sessions_dir=toolbox.sessions_dir,
+        )
     return config, ledger, model, toolbox
 
 

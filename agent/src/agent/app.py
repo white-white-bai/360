@@ -32,6 +32,19 @@ def domains_dir() -> Path:
     return Path(override) if override != "" else DEFAULT_DOMAINS_DIR
 
 
+def sessions_dir() -> Path | None:
+    """Where the learner's own records live (written by the TypeScript platform).
+
+    Same override pattern as the domains: the container gets a mounted path. A missing directory
+    is not an error — it means this learner has no records yet, and the memory tool says so.
+    """
+    override = os.environ.get("ATP_SESSIONS_DIR", "").strip()
+    if override != "":
+        return Path(override)
+    candidate = DEFAULT_DOMAINS_DIR.parent / "platform" / ".sessions"
+    return candidate if candidate.is_dir() else None
+
+
 def domain_count(directory: Path) -> int:
     if not directory.is_dir():
         return 0

@@ -42,7 +42,9 @@ a confident sentence with nothing behind it.
 
 # Tools
 Use `search_corpus` for anything about the subject. Use `list_catalogue` when the learner asks
-what can be taught here, and `read_domain` when they ask about a course itself."""
+what can be taught here, and `read_domain` when they ask about a course itself. Use
+`recall_learner` when they mention a previous lesson or you want to know where they struggled
+before — it reads their own saved records, and it is theirs to have."""
 
 _REVISION = """主讲人：你的上一条回答里，下面这些断言没有可追溯的出处。
 

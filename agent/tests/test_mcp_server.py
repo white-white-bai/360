@@ -59,6 +59,9 @@ async def test_the_signing_door_is_not_on_the_protocol(monkeypatch, tmp_path: Pa
     assert not any("sign" in name.lower() for name in names), (
         "a protocol that could sign would be a protocol that signs — ADR 0006/0010"
     )
+    assert "recall_learner" not in names, (
+        "the learner's own words stay in the classroom; the protocol is not a reader of them"
+    )
 
 
 async def test_search_over_the_protocol_returns_provenance(monkeypatch, tmp_path: Path) -> None:
