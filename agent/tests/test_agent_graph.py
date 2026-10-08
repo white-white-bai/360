@@ -114,6 +114,21 @@ def test_unknown_citations_ignores_ids_that_were_actually_retrieved() -> None:
     assert unknown_citations("没有任何引用", hits) == []
 
 
+def test_the_policy_filters_what_the_model_is_offered() -> None:
+    model = ScriptedModel([ModelReply("时区是一套规则。"), verdict(True)])
+    narrow = Toolbox(
+        retriever=StubRetriever([hit()]),
+        domains_dir=Path("unused"),
+        allowed=frozenset({"search_corpus"}),
+    )
+    agent = build_graph(model, narrow, max_steps=4)
+    final = agent.invoke(fresh_turn("时区是什么", "grounded"))
+
+    offered = [tool["function"]["name"] for tool in model.seen[0]["tools"]]
+    assert offered == ["search_corpus"], "a policy that only refuses is a policy the model wastes calls on"
+    assert final["verified"] is True
+
+
 def test_the_challenger_names_and_refutes_a_catalogued_misconception(tmp_path: Path) -> None:
     domain = tmp_path / "time-zones"
     domain.mkdir()

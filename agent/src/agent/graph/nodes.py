@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 from ..model import Model, ProviderError
-from ..tools import Toolbox, tool_schemas
+from ..tools import Toolbox
 from .state import AgentState
 
 # --------------------------------------------------------------------------------- the teacher --
@@ -83,7 +83,7 @@ def make_lead_node(model: Model, toolbox: Toolbox, *, max_steps: int):
             ]
 
         steps = int(state.get("steps", 0))
-        tools = tool_schemas() if grounded and steps < max_steps else None
+        tools = toolbox.schemas() if grounded and steps < max_steps else None
         reply = model.call(messages, actor="lead-explainer", tools=tools)
 
         assistant: dict[str, Any] = {"role": "assistant", "content": reply.text}

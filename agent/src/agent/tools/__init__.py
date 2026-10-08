@@ -80,6 +80,20 @@ def tool_schemas() -> list[dict]:
     return json.loads(json.dumps(_TOOL_SCHEMAS))
 
 
+def parse_tool_names(value: str) -> frozenset[str]:
+    """`"search_corpus, read_domain"` → a set. An unknown name is a refusal, never a default.
+
+    ADR 0007's rule at this door too: a typo that reached the policy would silently narrow or
+    not narrow a session, and neither shows up until the tool is missing at the wrong moment.
+    """
+    names = frozenset(part.strip() for part in value.split(",") if part.strip() != "")
+    known = {schema["function"]["name"] for schema in _TOOL_SCHEMAS}
+    unknown = names - known
+    if unknown:
+        raise ValueError(f"unknown tool(s): {', '.join(sorted(unknown))}; known: {', '.join(sorted(known))}")
+    return names
+
+
 @dataclass
 class Toolbox:
     """The tools, closed over a retriever and the assets directory."""
@@ -90,6 +104,16 @@ class Toolbox:
     # Where the learner's own session records live (the TypeScript platform writes them); None
     # means the memory tool answers "no records", which is the honest shape for a fresh machine.
     sessions_dir: Path | None = None
+    # The session's policy: None means every tool above is allowed. A narrowed set is enforced
+    # twice — the schemas offered to the model are filtered, and `run()` refuses — because
+    # "the model was never told about it" and "the model cannot touch it" are different claims.
+    allowed: frozenset[str] | None = None
+
+    def schemas(self) -> list[dict]:
+        """The schemas this session's policy leaves visible."""
+        if self.allowed is None:
+            return tool_schemas()
+        return [schema for schema in tool_schemas() if schema["function"]["name"] in self.allowed]
 
     def search_corpus(self, query: str) -> str:
         pool = self.retriever.search(query, k=POOL)
@@ -126,6 +150,8 @@ class Toolbox:
         return json.dumps(payload, ensure_ascii=False)
 
     def run(self, name: str, arguments: dict) -> str:
+        if self.allowed is not None and name not in self.allowed:
+            return json.dumps({"error": f"tool {name} is not allowed in this session"}, ensure_ascii=False)
         with span("tool.call", tool=name):
             if name == "search_corpus":
                 query = str(arguments.get("query", "")).strip()

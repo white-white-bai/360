@@ -121,6 +121,9 @@ Two things this provider does not give the later stages: **no embeddings endpoin
 - **State**: LangGraph's SQLite checkpointer (`agent/.state/checkpoints.sqlite`, gitignored);
   `--thread <id>` resumes a conversation across processes.
 - **Bounds**: `--max-steps` (default 4) caps model calls per turn. The loop cannot run forever.
+- **Policy**: `--tools search_corpus,read_domain` narrows a session. The set filters what the
+  model is OFFERED and refuses what arrives anyway; an unknown name is refused with the list of
+  known ones. Default: every read-only tool, which is all of them here.
 - **Cost**: the per-actor ledger prints at the end. `ATP_PRICE_IN`/`ATP_PRICE_OUT` turn tokens
   into money; without them the row says the price is unknown rather than inventing one.
 - Tools that WRITE are absent on purpose: building arrives gated in a later stage, and signing
@@ -142,7 +145,8 @@ Exposed: `search_corpus`, `list_domains`, `read_domain`, `describe_draft`, `vali
 `build_domain`. **Not exposed, deliberately: anything that signs** — ADR 0006/0010 make the
 signature a human act, and a protocol that could call it would be a protocol that signs. The
 validator is the platform's own (`validate-draft`, a thin CLI over the same rule the gate uses);
-a second implementation of one rule is how the two start disagreeing.
+a second implementation of one rule is how the two start disagreeing. `build_domain` is the one
+write-shaped door and is OFF unless `ATP_MCP_ALLOW_BUILD=1` — everything else here reads.
 
 ## Evals (stage 3)
 

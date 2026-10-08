@@ -13,6 +13,7 @@ signature gate consults becomes a coin toss.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from functools import lru_cache
@@ -21,7 +22,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from .app import DEFAULT_DOMAINS_DIR, domains_dir
-from .config import config_from_env
+from .config import config_from_env, env_flag
 from .rag.assets import load_passages
 from .rag.embed import embedder_from_env
 from .rag.store import Retriever
@@ -120,7 +121,17 @@ def validate_draft(draft_id: str) -> str:
 
 @mcp.tool
 def build_domain(topic: str) -> str:
-    """从公开来源现做一份教材草稿（需要 provider，可能几分钟）。它只写草稿：签字必须由人在平台上做。"""
+    """从公开来源现做一份教材草稿（可能几分钟）。默认关闭——它写草稿、花 provider 调用；开启需 ATP_MCP_ALLOW_BUILD=1。签字必须由人在平台上做。"""
+    # The one WRITE-shaped door on this protocol, and therefore the one that needs a switch:
+    # everything else here reads. Opt-in per server, said out loud in the refusal.
+    if not env_flag(os.environ, "ATP_MCP_ALLOW_BUILD"):
+        return json.dumps(
+            {
+                "error": "the builder is off for MCP by default — it writes a draft and spends provider "
+                "calls. Set ATP_MCP_ALLOW_BUILD=1 to enable it for this server."
+            },
+            ensure_ascii=False,
+        )
     npm = shutil.which("npm")
     if npm is None:
         return json.dumps({"error": "npm is not on PATH"}, ensure_ascii=False)

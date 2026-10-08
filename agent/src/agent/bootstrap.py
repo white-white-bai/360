@@ -47,8 +47,14 @@ def cached_toolbox() -> Toolbox:
     )
 
 
-def live_stack(*, rerank: bool = True) -> tuple[Config, Ledger, ProviderModel, Toolbox]:
-    """Provider, ledger, model and tools, built the one way."""
+def live_stack(
+    *, rerank: bool = True, tools: frozenset[str] | None = None
+) -> tuple[Config, Ledger, ProviderModel, Toolbox]:
+    """Provider, ledger, model and tools, built the one way.
+
+    `tools` is a session policy: None means every tool (`schemas()` shows them all), a set means
+    only those — filtered where the model is OFFERED tools, not merely where they are refused.
+    """
     from .telemetry import configured  # lazy: nothing here needs a tracer until the stack runs
 
     configured()
@@ -57,14 +63,14 @@ def live_stack(*, rerank: bool = True) -> tuple[Config, Ledger, ProviderModel, T
         raise NoProvider("没有配置 provider（ATP_API_KEY / ATP_MODEL；也可写进仓库根目录的 .env）")
     ledger = Ledger()
     model = ProviderModel(config, ledger)
-    toolbox = cached_toolbox()
-    if not rerank:
-        toolbox = Toolbox(
-            retriever=toolbox.retriever,
-            domains_dir=toolbox.domains_dir,
-            rerank_config=None,
-            sessions_dir=toolbox.sessions_dir,
-        )
+    base = cached_toolbox()
+    toolbox = Toolbox(
+        retriever=base.retriever,
+        domains_dir=base.domains_dir,
+        rerank_config=base.rerank_config if rerank else None,
+        sessions_dir=base.sessions_dir,
+        allowed=tools,
+    )
     return config, ledger, model, toolbox
 
 

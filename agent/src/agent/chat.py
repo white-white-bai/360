@@ -14,20 +14,28 @@ from .bootstrap import NoProvider, checkpointer, live_stack
 from .console import utf8_console
 from .graph.graph import build_graph, fresh_turn
 from .model import ProviderError
+from .tools import parse_tool_names
 
 
 def main() -> int:
     utf8_console()
     parser = argparse.ArgumentParser(description="The agent, in a terminal")
     parser.add_argument("question")
-    parser.add_argument("--mode", choices=["grounded", "chat"], default="grounded")
+    parser.add_argument("--mode", choices=["chat", "grounded"], default="grounded")
     parser.add_argument("--thread", default="terminal", help="the session id; repeating one continues it")
     parser.add_argument("--max-steps", type=int, default=4, help="model calls a turn may spend")
     parser.add_argument("--no-rerank", action="store_true", help="keep the fused order for searches")
+    parser.add_argument("--tools", default=None, help="逗号分隔的会话白名单，如 search_corpus,read_domain")
     args = parser.parse_args()
 
     try:
-        _, ledger, model, toolbox = live_stack(rerank=not args.no_rerank)
+        allowed = parse_tool_names(args.tools) if args.tools else None
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+    try:
+        _, ledger, model, toolbox = live_stack(rerank=not args.no_rerank, tools=allowed)
     except NoProvider as error:
         print(str(error), file=sys.stderr)
         return 1

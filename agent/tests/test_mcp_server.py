@@ -98,3 +98,12 @@ def test_an_id_that_would_reach_the_filesystem_badly_is_refused() -> None:
     for bad in ("../secrets", "a/b", "a\\b", "", "  "):
         with pytest.raises(ValueError):
             mcp_server._safe_id(bad)
+
+
+async def test_the_builder_is_off_over_mcp_unless_switched_on(monkeypatch) -> None:
+    # The one write-shaped door on this protocol; everything else reads. The refusal names the
+    # switch, because "why can't it build" should not take a code dive to answer.
+    monkeypatch.delenv("ATP_MCP_ALLOW_BUILD", raising=False)
+    async with Client(mcp_server.mcp) as client:
+        result = json.loads(text_of(await client.call_tool("build_domain", {"topic": "任意主题"})))
+    assert "ATP_MCP_ALLOW_BUILD" in result["error"]
