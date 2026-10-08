@@ -52,12 +52,18 @@ CSS = """
   background: #0e1a17 !important; color: var(--chalk) !important; border-color: #2c4a42 !important;
 }
 
-/* The lesson is the teacher's; the learner's words are inputs. Two voices, two shapes. */
-.chatbot .message-row.bot-row { border-left: 2px solid var(--grid); padding-left: 12px; }
-.chatbot .message-row.bot-row .bubble { background: transparent; border: 0; padding-left: 0; }
+/* The lesson is the teacher's; the learner's words are inputs. Two voices, two shapes.
+   All chat surfaces are forced transparent first: gradio's default bubble is a LIGHT fill, and
+   chalk text on it is invisible — which is exactly how a greeting rendered as a giant empty
+   bubble (the first screenshot's "placeholder illustration" was the greeting, white on white). */
+.chatbot .message-row, .chatbot .bubble, .chatbot .message {
+  background: transparent !important; border-color: transparent !important;
+}
+.chatbot .message-row.bot-row { border-left: 2px solid var(--grid) !important; padding-left: 12px; }
 .chatbot .message-row.user-row { justify-content: flex-end; }
 .chatbot .message-row.user-row .bubble {
-  background: #1c332c; color: var(--chalk); border: 1px solid var(--grid); max-width: 80%;
+  background: #1c332c !important; color: var(--chalk) !important;
+  border: 1px solid var(--grid) !important; max-width: 80%;
 }
 
 /* Reading rhythm for the answers: light-on-dark reads thinner, so more air and a trace of
@@ -294,6 +300,10 @@ def build_ui(agent_factory: Callable[[], tuple[Any, Any]] | None = None):
                     value=[{"role": "assistant", "content": GREETING}],
                     label="课堂",
                     height=400,
+                    # Panel, not bubble: gradio 6's bubble layout wraps each message in its own
+                    # light-filled shape, which fights a dark teaching surface — and the teacher's
+                    # turn is prose, not a speech balloon.
+                    layout="panel",
                 )
                 with gr.Row():
                     message = gr.Textbox(
