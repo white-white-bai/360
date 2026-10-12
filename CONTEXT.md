@@ -11,7 +11,7 @@ The set of Domains a learner may choose from at entry. Its length is an honest s
 _Avoid_: Menu, marketplace, store, list
 
 **Profession**:
-The industry a learner names at entry — the door, not the lesson. A Profession holds a tier, a risk, a boundary (what will NOT be taught here), a list of Domains, and a Capability Map. Its status is computed, never stored: open when a listed Domain is signed, planned when none is, closed when its risk is high. The skeleton is the official occupation classification; folk names ("三百六十行") are aliases, not taxonomy.
+The industry a learner names at entry — the door, not the lesson. A Profession holds a tier, a risk, a boundary (what will NOT be taught here), a list of Domains, a reviewer roster, and a Capability Map. Its status is computed, never stored: open when a listed Domain is signed, planned when none is, closed when it is high-risk and lacks two-reviewer backing. The skeleton is the official occupation classification; folk names ("三百六十行") are aliases, not taxonomy.
 _Avoid_: Industry, job, career, trade
 
 **Competency**:
@@ -27,7 +27,7 @@ How much of a Profession can be taught: A — text-verifiable knowledge, the ful
 _Avoid_: Level, grade, difficulty
 
 **Risk**:
-What happens if the platform teaches this wrong: ordinary, or high (people, property, or rights). A high-risk Profession is closed — it lists no Domains and both doors refuse its topics — until two independent reviewers can sign, which no Domain can yet do.
+What happens if the platform teaches this wrong: ordinary, or high (people, property, or rights). A high-risk Profession stays closed — it lists no Domain that is not co-signed, and both doors refuse its topics — until two independent reviewers can sign, which a Domain can now do by carrying a second signature.
 _Avoid_: Severity, danger, safety
 
 **Category**:
@@ -121,6 +121,10 @@ _Avoid_: Registry, gallery, collection, asset store
 **Owner**:
 The named person accountable for a Domain's or a library's material staying correct and current.
 _Avoid_: Author, maintainer, admin
+
+**Reviewer**:
+The named person who has read a Domain's corpus and signed for it. A Domain is **co-signed** when it carries two reviewers with different names, neither a placeholder — the backing a high-risk Profession needs to open. Independence is an attestation: the platform can check that two names differ, and it can never check that they are two people.
+_Avoid_: Approver, auditor, validator, signer
 
 ### The blackboard
 
