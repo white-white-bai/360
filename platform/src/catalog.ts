@@ -27,6 +27,14 @@ export const DOMAINS_DIR = join(REPO_ROOT, "domains");
 export const PROFESSIONS_FILE = join(REPO_ROOT, "professions", "professions.md");
 
 /**
+ * The Competency layer (ADR 0015): the must-know units of each Profession,
+ * linked by prerequisites, each naming the Domains that teach it and the part
+ * this platform does not teach. Same file, same grammar, same rules — the
+ * middle layer is an asset like the others, not a second mechanism.
+ */
+export const COMPETENCIES_FILE = join(REPO_ROOT, "professions", "competencies.md");
+
+/**
  * Domains the builder wrote and nobody has signed yet (ADR 0010).
  *
  * Outside `domains/` on purpose: the library loads everything it finds there, and a draft that

@@ -39,7 +39,8 @@ npm run build-domain -- "<主题>"          # 现造一份草稿（ADR 0010）
 npm run review-domain -- <id>             # 过目、签字，进目录
 npm run probe                             # provider 自检：端点/模型/key 长度，各一次最小调用
 npm run validate                          # 校验全部教材资产
-npm test                                  # 269 个测试（node --test，无框架）
+npm run coverage                          # 缺口表：每个职业能学什么、还缺什么、不在这里教什么（ADR 0015）
+npm test                                  # 288 个测试（node --test，无框架）
 ```
 
 agent 服务（`cd agent`；一次性 `python -m venv .venv && .venv\Scripts\pip install -e ".[dev]"`）：
@@ -92,10 +93,10 @@ export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；�
 | `agent/` | agent 服务（Python）：RAG、LangGraph 图、工具、MCP server、Gradio 页、评测与部署 |
 | `domains/` | 已签字的教材；现场造的还带 `sources.json`（抓取的原文在 `sources/`，不入库，出处引用在语料正文里） |
 | `domains-draft/` | 未签字的草稿（gitignored） |
-| `library/` · `professions/` | 全站共用的 Persona 与 Style；行业目录（ADR 0012） |
+| `library/` · `professions/` | 全站共用的 Persona 与 Style；行业目录（ADR 0012）与**能力单元**（ADR 0015） |
 | `platform/.sessions/` | 学习者的课堂记录（gitignored；agent 的 memory **只读**它） |
 | `agent/.state/` | agent 的会话检查点（gitignored） |
-| `docs/adr/` | 决策记录，0001–0013——代码之前的每个决定都在这里 |
+| `docs/adr/` | 决策记录，0001–0015——代码之前的每个决定都在这里 |
 | `CONTEXT.md` | 术语表：代码与文档必须使用其中的词 |
 | `.commandcode/skills/` | 本仓库自己的工程 skill 资产，和教学平台不是一回事 |
 
@@ -110,8 +111,9 @@ export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；�
 ## 状态与边界
 
 - ADR 0013 的分期全部落地：Stage 0 骨架 → 1 RAG（golden hits@K **5/5**）→ 2 Agent 图（有界 ReAct + 独立校验 + 质疑者）→ 3 MCP + 评测（可回答题 **3/3**、首考通过 **1/3**、不可回答题老实说"语料查不到"）→ 4 交付（compose 整套真机验证）。
-- 测试：教材平台 **269**、agent **74**，全绿。
+- 测试：教材平台 **288**、agent **74**，全绿。
 - ADR 0001 的验收实验**仍未运行**——"有没有教得更好"还没有数据；`agent/evals/` 是它的种子指标。
-- ADR 0014 定下主张与形状：平台教的是认知层，动手的部分由每个 open 职业的**能力地图**说清去向。主张已成文（`README`、`CONTEXT.md`、`docs/adr/0014`），**能力地图本身尚未落地**——Competency 层与 `npm run coverage` 还是纸上的东西。
+- ADR 0014 定下主张与形状，ADR 0015 把它落成机制：平台教的是认知层，动手的部分由每个 open 职业的**能力地图**说清去向。地图已落地（`professions/competencies.md`、`npm run coverage`、入口面板上的一行），但**只有软件开发人员写下了单元**——`npm run coverage` 现报 5 个单元、covered 4、planned 1。其余九个职业的地图是空的，而空的那一半是**显示出来的**，不是省略的。
+- 距离"三百六十行"还很远，好在这个距离是**说得出口的**：官方骨架 1639 个职业，目录里 10 个，其中 1 个可学。`npm run coverage` 就是逐行念这句话的工具——它只回答"还缺什么"，补哪一行是人的决定（ADR 0006/0015）。
 - 明确未落地：FineTuning 与多模态视觉（本机 GPU 是 GT 710，且无必要）；内容安全只有预留位置；K8s 清单与 vLLM 文档未在任何地方验证过；高风险行业关闭（ADR 0012）。
 - 直接课堂是明确接受的取舍：快、任意主题，代价是不设防的边界；它永远不计分、不签字、不声明接地（ADR 0011）。

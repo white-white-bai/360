@@ -34,6 +34,17 @@ interface BoardOptionsPayload {
   defaultModel: string | null;
   drafts: Array<{ id: string; name: string }>;
   recorded: { persona: string; style: string; domain: string };
+  /** The Capability Map the entry panel draws, both halves (ADR 0014/0015). */
+  professions: Array<{
+    id: string;
+    status: "open" | "planned" | "closed";
+    competencies: Array<{ id: string; name: string; status: "covered" | "planned" }>;
+    capability: {
+      covered: Array<{ id: string; name: string }>;
+      planned: Array<{ id: string; name: string }>;
+      beyond: Array<{ name: string; because: string[] }>;
+    };
+  }>;
 }
 
 /**
@@ -673,6 +684,37 @@ test("the options are a snapshot: the library's offerings, and models only when 
     assert.equal(offered.recorded.domain, "time-zones");
     assert.equal(offered.recorded.style, "analogy-heavy");
     assert.deepEqual(offered.drafts, [], "a fresh shelf has nothing waiting for a signature");
+  });
+});
+
+test("the options carry the Capability Map, both halves of it (ADR 0014 decision 3)", async () => {
+  // The point of ADR 0014's second decision is that the page shows what is
+  // taught AND what is not, and that the empty half is displayed rather than
+  // left off. So both halves are asserted here, on the real assets: a
+  // break that dropped `beyond`, or one that hid the map from a Profession
+  // that has none, would look like a tidy page and be a dishonest one.
+  await withBoard(async (base) => {
+    const offered = (await (await fetch(`${base}/options`)).json()) as BoardOptionsPayload;
+
+    const software = offered.professions.find((profession) => profession.id === "software-developer");
+    assert.ok(software, "the catalogue's one taught Profession reaches the page");
+    assert.equal(software.status, "open");
+    assert.ok(software.capability.covered.length > 0, "a signed Domain backs part of the map");
+    assert.ok(software.capability.planned.length > 0, "ADRs 0014/0015: the missing half is shown, not hidden");
+    assert.ok(software.capability.beyond.length > 0, "and what is NOT taught here is shown with it");
+    // 「无——这一单元完全落在认知层」 is an answer about the unit, not a gap in
+    // the map, so it is counted rather than printed at the learner.
+    assert.ok(
+      !software.capability.beyond.some((entry) => entry.because.some((line) => line.startsWith("无"))),
+      "a unit that declares nothing beyond the cognitive layer is not reported as a gap",
+    );
+
+    // A Profession nobody has written a unit for is still in the payload, with
+    // an empty map — the panel says so out loud instead of omitting the row.
+    const accountant = offered.professions.find((profession) => profession.id === "accountant");
+    assert.ok(accountant, "an untaught Profession is still offered");
+    assert.equal(accountant.competencies.length, 0);
+    assert.deepEqual(accountant.capability, { covered: [], planned: [], beyond: [] });
   });
 });
 

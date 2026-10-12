@@ -74,6 +74,10 @@ function tmpRoot(t: { after: (fn: () => void) => void }, options: { seed?: boole
     ].join("\n"),
     "utf8",
   );
+  // The Competency asset (ADR 0015) is a catalogue of the test's own too, for
+  // exactly the reason above: the real one names Professions and Domains that
+  // do not exist here, and every one of them would come back as an error.
+  writeFileSync(join(root, "competencies.md"), "---\n---\n", "utf8");
   if (options.seed !== false) seedLibrary(root);
   return root;
 }
@@ -139,6 +143,7 @@ function run(root: string): { codes: string[]; errors: number; warnings: number 
     stylesDir: join(root, "styles"),
     domainsDir: join(root, "domains"),
     professionsFile: join(root, "professions.md"),
+    competenciesFile: join(root, "competencies.md"),
   });
   return {
     codes: report.findings.map((f: Finding) => f.code),

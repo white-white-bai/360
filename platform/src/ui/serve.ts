@@ -15,7 +15,14 @@ import { composeExpert, loadLibrary } from "../experts/load.ts";
 import { describeExpert } from "../experts/types.ts";
 import { PROFILES } from "../experiment/fixtures-experiment.ts";
 import { configuredModels, defaultModel, selectLiveProvider } from "../providers/live.ts";
-import { highRiskRefusal, loadProfessions, professionOptions, type ProfessionIndex } from "../professions/load.ts";
+import {
+  highRiskRefusal,
+  loadCompetencies,
+  loadProfessions,
+  professionOptions,
+  type CompetencyIndex,
+  type ProfessionIndex,
+} from "../professions/load.ts";
 import { ScriptedProvider } from "../providers/scripted.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import { render } from "../render/render.ts";
@@ -218,6 +225,13 @@ export function createBoardServer(options: BoardOptions = {}): Server {
    */
   const freshProfessions = (): ProfessionIndex => loadProfessions();
 
+  /**
+   * The Competency layer, read per request for the same reason (ADR 0015): a
+   * unit's status is computed from what is signed right now, so the capability
+   * map the panel shows cannot outlive the signature that produced it.
+   */
+  const freshCompetencies = (): CompetencyIndex => loadCompetencies();
+
   return createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
 
@@ -343,9 +357,14 @@ export function createBoardServer(options: BoardOptions = {}): Server {
       // with the connection that starts the lesson, and nothing is kept between the two requests.
       let offered: ReturnType<typeof catalogue>;
       let professions: ProfessionIndex;
+      let competencies: CompetencyIndex;
       try {
         offered = catalogue(freshLibrary());
         professions = freshProfessions();
+        // Loaded here rather than swallowed: the panel shows the map's empty half
+        // as an empty half, but a competencies file that will not parse is not an
+        // empty map — showing one would be the page inventing a fact.
+        competencies = freshCompetencies();
       } catch (error) {
         response.writeHead(500, { "content-type": "text/plain; charset=utf-8" });
         response.end(`读不到教材目录：${error instanceof Error ? error.message : String(error)}`);
@@ -360,7 +379,11 @@ export function createBoardServer(options: BoardOptions = {}): Server {
           domains: offered.domains,
           // The industry door (ADR 0012): grouped by category, each entry carrying
           // its computed status — open, planned, or closed — never a stored claim.
-          professions: professionOptions(professions, new Set(offered.domains.map((domain) => domain.id))),
+          professions: professionOptions(
+            professions,
+            new Set(offered.domains.map((domain) => domain.id)),
+            competencies,
+          ),
           styles: offered.styles,
           personas: offered.personas,
           models,

@@ -29,7 +29,7 @@ test("every corpus passage carries provenance", () => {
 });
 
 test("the corpus is in the source language, the delivery is not", () => {
-  // ADR 0004/0018: grounding traces to source-language passages. If the corpus
+  // ADR 0004/0006: grounding traces to source-language passages. If the corpus
   // were a translation, tracing to it would verify the wrong artefact.
   const ascii = domain.corpus.passages.map((p) => p.text).join(" ");
   assert.match(ascii, /[A-Za-z]{4,}/, "corpus text should be English");

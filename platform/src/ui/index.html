@@ -252,6 +252,8 @@
       <div class="field-body">
         <input id="pick-topic" type="text" autocomplete="off" placeholder="输入主题：已有的直接上课；没有的，现做一份" />
         <p class="catalogue">行业：<span id="professions"></span></p>
+        <p class="catalogue" id="capability-line" hidden>能力地图 · <span id="capability"></span></p>
+        <p class="catalogue" id="capability-beyond" hidden></p>
         <p class="catalogue">已有教材：<span id="catalogue"></span></p>
         <p class="catalogue" id="draft-line" hidden>待签字：<span id="drafts"></span></p>
       </div>
@@ -467,6 +469,9 @@ const sweepBox = document.getElementById("review-sweep");
 const topicInput = document.getElementById("pick-topic");
 const catalogueLine = document.getElementById("catalogue");
 const professionsLine = document.getElementById("professions");
+const capabilityLine = document.getElementById("capability-line");
+const capabilityBody = document.getElementById("capability");
+const capabilityBeyond = document.getElementById("capability-beyond");
 const draftLine = document.getElementById("draft-line");
 const draftsLine = document.getElementById("drafts");
 const stylePick = document.getElementById("pick-style");
@@ -781,6 +786,106 @@ function fill(select, entries) {
   }
 }
 
+// ------------------------------------------------------- the capability map --
+
+// ADR 0014 decision 2: every open Profession carries a map of what it can teach
+// here, and decision 3: BOTH halves are shown — the part this platform does not
+// teach is a product statement, not a footnote hidden in a tooltip. So two lines
+// are on the page (what you can learn, what is still missing; then what is not
+// taught here and what kind of thing teaches it), and the tooltip holds the
+// long form — each unit's prerequisites — for the reader querying rather than
+// reading.
+
+/** The profession whose map the line describes until the pointer says otherwise. */
+let capabilityDefault = null;
+
+/**
+ * The map as a line a learner reads, not a table a reviewer queries.
+ *
+ * The counts come first because they are the honest headline: "能学 4 · 还缺 1"
+ * says something a bare list of names does not — how much of this walk of life
+ * the platform actually covers today.
+ */
+function capabilitySummary(profession) {
+  const map = profession.capability;
+  const names = (units) => units.map((unit) => unit.name).join("、");
+
+  if (map.covered.length === 0 && map.planned.length === 0) {
+    return "还没有——这一行能学什么，要有人先写下能力单元（ADR 0015）";
+  }
+
+  const parts = [];
+  if (map.covered.length > 0) parts.push(`能学 ${map.covered.length}：${names(map.covered)}`);
+  if (map.planned.length > 0) parts.push(`还缺 ${map.planned.length}：${names(map.planned)}`);
+  return parts.join("　|　");
+}
+
+/**
+ * The other half, on the page and not in a tooltip.
+ *
+ * ADR 0015 decision 3 is explicit that a map whose second half must be hovered
+ * to be read is a syllabus with better manners — so the destinations are their
+ * own visible line, spelling out not just *that* something is untaught but
+ * *what kind of thing* teaches it. The tooltip keeps the full map (each unit's
+ * prerequisites) for the reader who wants to query it; it is not where the
+ * answer lives.
+ */
+function capabilityBeyondText(profession) {
+  const beyond = profession.capability.beyond;
+  if (beyond.length === 0) return "";
+  return `不在这里教：${beyond.map((entry) => `${entry.name}——${entry.because.join("；")}`).join("　|　")}`;
+}
+
+/**
+ * The whole map, in the spelling a learner can read: `requires` is stored as
+ * ids, and an id is not a route (the same reason `npm run coverage` resolves
+ * them to names).
+ */
+function capabilityDetail(profession) {
+  const byId = new Map(profession.competencies.map((unit) => [unit.id, unit.name]));
+  const lines = [`${profession.label} 的能力地图（ADR 0015）`];
+
+  for (const unit of profession.capability.covered) {
+    const after = unit.requires.map((id) => byId.get(id) ?? id);
+    lines.push(`能学：${unit.name}${after.length > 0 ? `　先修：${after.join("、")}` : ""}`);
+  }
+  for (const unit of profession.capability.planned) {
+    lines.push(`还缺：${unit.name}——还没有已签字的教材教它`);
+  }
+  for (const entry of profession.capability.beyond) {
+    lines.push(`不在这里教：${entry.name}——${entry.because.join("；")}`);
+  }
+  return lines.join("\n");
+}
+
+function showCapability(profession) {
+  if (profession === null) {
+    capabilityLine.hidden = true;
+    capabilityBeyond.hidden = true;
+    return;
+  }
+  capabilityLine.hidden = false;
+  capabilityBody.textContent = `${profession.label}：${capabilitySummary(profession)}`;
+  capabilityLine.title = capabilityDetail(profession);
+
+  const beyond = capabilityBeyondText(profession);
+  capabilityBeyond.hidden = beyond === "";
+  capabilityBeyond.textContent = beyond;
+  capabilityBeyond.title = beyond === "" ? "" : capabilityDetail(profession);
+}
+
+/** Default to a Profession that actually has a map, preferring one that is open. */
+function renderCapability(options) {
+  const mapped = options.professions.filter((profession) => profession.competencies.length > 0);
+  capabilityDefault =
+    mapped.find((profession) => profession.status === "open") ??
+    mapped[0] ??
+    options.professions.find((profession) => profession.status === "open") ??
+    options.professions[0] ??
+    null;
+  showCapability(capabilityDefault);
+}
+
 /** Build the entry panel from one `/options` snapshot. Re-runnable: a signature changes it. */
 function applyOptions(options) {
   offered = options;
@@ -829,10 +934,18 @@ function applyOptions(options) {
         } else {
           chip.className = "closed";
         }
+        // The map answers to the pointer as well as to the click: hovering a
+        // Profession is how a learner asks "and what about this row?" without
+        // committing to it. Leaving puts the default map back.
+        chip.addEventListener("mouseenter", () => showCapability(profession));
+        chip.addEventListener("focus", () => showCapability(profession));
+        chip.addEventListener("mouseleave", () => showCapability(capabilityDefault));
+        chip.addEventListener("blur", () => showCapability(capabilityDefault));
         professionsLine.append(chip, document.createTextNode("　"));
       }
     }
   }
+  renderCapability(options);
 
   // The Catalogue stays visible under the input: its length is the honest statement of what can
   // be taught, and clicking a name is the same as typing it.

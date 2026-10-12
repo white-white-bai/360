@@ -1,11 +1,19 @@
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { DOMAINS_DIR, PERSONAS_DIR, PROFESSIONS_FILE, STYLES_DIR } from "../catalog.ts";
+import { COMPETENCIES_FILE, DOMAINS_DIR, PERSONAS_DIR, PROFESSIONS_FILE, STYLES_DIR } from "../catalog.ts";
 import type { Domain, Persona, Style } from "../experts/types.ts";
 import { loadDomain, loadPersona, loadStyle } from "../experts/load.ts";
 import { findPassage } from "../grounding/corpus.ts";
-import { loadProfessions, type ProfessionIndex } from "../professions/load.ts";
+import {
+  loadCompetencies,
+  loadProfessions,
+  professionStatus,
+  type Competency,
+  type CompetencyIndex,
+  type ProfessionIndex,
+  type ProfessionStatus,
+} from "../professions/load.ts";
 import { unusableSourceReason } from "../build/fetch.ts";
 import type { Finding, Severity, ValidationReport } from "./types.ts";
 
@@ -524,7 +532,7 @@ function validateProfessions(
   const findings: Finding[] = [];
 
   for (const profession of index.professions.values()) {
-    const where = `professions/professions.md#${profession.id}`;
+    const where = professionWhere(profession.id);
     if (profession.boundary.trim() === "") {
       findings.push(
         finding(
@@ -576,6 +584,201 @@ function validateProfessions(
   return findings;
 }
 
+// ------------------------------------------------------------- competency rules
+
+function professionWhere(id: string): string {
+  return `professions/professions.md#${id}`;
+}
+
+function competencyWhere(id: string): string {
+  return `professions/competencies.md#${id}`;
+}
+
+/**
+ * The first prerequisite cycle in the file, as a path — or nothing.
+ *
+ * DFS with three colours rather than "does a topological sort succeed":
+ * the finding has to name the loop, because "there is a cycle somewhere in
+ * forty units" is a message the reader cannot act on. A cycle that a
+ * learner walks is also the one defect here that makes the map meaningless
+ * rather than merely incomplete, which is why it is worth the extra code.
+ */
+function findPrerequisiteCycle(index: CompetencyIndex): string[] | undefined {
+  const colour = new Map<string, "open" | "done">();
+  const path: string[] = [];
+
+  const walk = (id: string, unit: Competency): string[] | undefined => {
+    colour.set(id, "open");
+    path.push(id);
+    for (const prerequisite of unit.requires) {
+      const next = index.competencies.get(prerequisite);
+      // A missing rung is `competency.unknown-prerequisite`'s finding, not this one's.
+      if (next === undefined) continue;
+      const state = colour.get(prerequisite);
+      if (state === "open") return [...path.slice(path.indexOf(prerequisite)), prerequisite];
+      if (state === undefined) {
+        const found = walk(prerequisite, next);
+        if (found !== undefined) return found;
+      }
+    }
+    path.pop();
+    colour.set(id, "done");
+    return undefined;
+  };
+
+  // Sorted, so two runs over the same file name the same cycle.
+  for (const id of [...index.competencies.keys()].sort()) {
+    if (colour.has(id)) continue;
+    const unit = index.competencies.get(id);
+    if (unit === undefined) continue;
+    const found = walk(id, unit);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * The Competency layer's rules (ADR 0015).
+ *
+ * These are the rules ADR 0015 called for, and each one is written against a
+ * field the loader leaves OPTIONAL, so that it can actually fire. That is the
+ * same choice `profession.missing-boundary` documents from the other side: a
+ * rule the loader has already made unreachable is not a safeguard, it is a
+ * comment that reads like one.
+ *
+ * Two of them are warnings rather than errors, and deliberately so.
+ * `competency.orphan` fires when a Profession's units declare no prerequisites
+ * AT ALL — not when some unit is unreferenced, because every route's last step
+ * is unreferenced and a rule that fired there would flag correct material.
+ * `profession.no-competency` fires only for a Profession that is already OPEN:
+ * a `planned` Profession with no map is exactly what the empty half of the
+ * ledger is for, and warning about it would be warning about the catalogue's
+ * length (ADR 0002/0012).
+ */
+function validateCompetencies(
+  index: CompetencyIndex,
+  professions: ProfessionIndex,
+  signedDomainIds: ReadonlySet<string>,
+): Finding[] {
+  const findings: Finding[] = [];
+  const units = [...index.competencies.values()];
+
+  for (const unit of units) {
+    const where = competencyWhere(unit.id);
+
+    if (!professions.professions.has(unit.professionId)) {
+      findings.push(
+        finding(
+          "error",
+          "competency.unknown-profession",
+          where,
+          `profession ${JSON.stringify(unit.professionId)} is not in the catalogue`,
+          "point it at a Profession declared with kind: profession, or add that Profession first",
+        ),
+      );
+    }
+
+    for (const domainId of unit.domainIds) {
+      if (!signedDomainIds.has(domainId)) {
+        findings.push(
+          finding(
+            "error",
+            "competency.unknown-domain",
+            where,
+            `Domain ${JSON.stringify(domainId)} is not signed — a draft is not coverage`,
+            "sign the Domain first, or take it off the list",
+          ),
+        );
+      }
+    }
+
+    for (const prerequisite of unit.requires) {
+      if (!index.competencies.has(prerequisite)) {
+        findings.push(
+          finding(
+            "error",
+            "competency.unknown-prerequisite",
+            where,
+            `prerequisite ${JSON.stringify(prerequisite)} is not a competency in this file`,
+            "point it at a declared unit, or drop it — a route cannot run through a missing rung",
+          ),
+        );
+      }
+    }
+
+    if (unit.boundary.trim() === "") {
+      findings.push(
+        finding(
+          "error",
+          "competency.missing-boundary",
+          where,
+          "no boundary — the learner cannot see what this unit will NOT be taught",
+          "write the `boundary` line; it is the same honesty a Profession's own boundary carries",
+        ),
+      );
+    }
+
+    if (unit.beyond.length === 0) {
+      findings.push(
+        finding(
+          "error",
+          "competency.missing-beyond",
+          where,
+          "no `beyond` — this unit claims to be taught entirely here, which the map must state rather than imply",
+          "write what this platform does not teach for this unit and what kind of thing teaches it; " +
+            "「无——这一单元完全落在认知层」 is a real answer",
+        ),
+      );
+    }
+  }
+
+  const cycle = findPrerequisiteCycle(index);
+  if (cycle !== undefined) {
+    findings.push(
+      finding(
+        "error",
+        "competency.cycle",
+        competencyWhere(cycle[0] ?? ""),
+        `prerequisites form a cycle: ${cycle.join(" → ")}`,
+        "break it — a learner cannot start a route that comes back to where it began",
+      ),
+    );
+  }
+
+  for (const profession of professions.professions.values()) {
+    const own = units.filter((unit) => unit.professionId === profession.id);
+
+    if (own.length === 0) {
+      if (professionStatus(profession, signedDomainIds) === "open") {
+        findings.push(
+          finding(
+            "warning",
+            "profession.no-competency",
+            professionWhere(profession.id),
+            "this Profession is open — a signed Domain teaches it — but nothing says what it can teach",
+            "write its competency units; until then the entry panel shows an empty map (ADR 0015)",
+          ),
+        );
+      }
+      continue;
+    }
+
+    if (!own.some((unit) => unit.requires.length > 0)) {
+      findings.push(
+        finding(
+          "warning",
+          "competency.orphan",
+          professionWhere(profession.id),
+          "these units declare no prerequisites at all, so the map is a list, not a route",
+          "state the order with `requires`, or accept a map with no edges between its units",
+        ),
+      );
+    }
+  }
+
+  return findings;
+}
+
 // --------------------------------------------------------------- library rules
 
 function validateAxis<T extends Persona | Style>(kind: string, item: T, path: string): Finding[] {
@@ -603,6 +806,8 @@ export interface ValidateOptions {
   domainsDir?: string;
   /** Defaults to the repo's industry catalogue (ADR 0012). */
   professionsFile?: string;
+  /** Defaults to the repo's Competency asset (ADR 0015). */
+  competenciesFile?: string;
 }
 
 /**
@@ -647,6 +852,7 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
   const stylesDir = options.stylesDir ?? STYLES_DIR;
   const domainsDir = options.domainsDir ?? DOMAINS_DIR;
   const professionsFile = options.professionsFile ?? PROFESSIONS_FILE;
+  const competenciesFile = options.competenciesFile ?? COMPETENCIES_FILE;
 
   const findings: Finding[] = [];
 
@@ -697,6 +903,19 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
 
   if (professions.value !== undefined) {
     findings.push(...validateProfessions(professions.value, domainIds));
+  }
+
+  // The Competency rules need both halves of the middle layer's contract: the
+  // catalogue (does this Profession exist?) and the signature set (is this
+  // Domain really signed?). With no catalogue every Profession reference is
+  // unknowable, so the rules wait rather than reporting the whole file as
+  // unknown — the same reasoning that keeps the Domain rules independent.
+  const competencies = safely(competenciesFile, () => loadCompetencies(competenciesFile));
+  if (competencies.value === undefined && competencies.problem !== undefined) {
+    findings.push(competencies.problem);
+  }
+  if (competencies.value !== undefined && professions.value !== undefined) {
+    findings.push(...validateCompetencies(competencies.value, professions.value, domainIds));
   }
 
   findings.push(...validateDomainOverlap(loadedDomains));
