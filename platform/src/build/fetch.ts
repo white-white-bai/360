@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 
 /**
  * Fetching a candidate source (ADR 0010).
@@ -47,7 +49,118 @@ export function unusableSourceReason(url: string): string | undefined {
     : undefined;
 }
 
+// ----------------------------------------------------------- provided sources --
+
+/**
+ * The second entrance (ADR 0016): a document the Owner supplied rather than one the builder
+ * fetched. Same `FetchedDocument` shape, same kernel check behind it — the only difference is
+ * where the bytes came from, and a `local:` identifier is how that difference is recorded.
+ */
+export const LOCAL_SCHEME = "local:";
+
+/** Is this source identifier one the Owner provided, rather than a URL? */
+export function isLocalSource(identifier: string): boolean {
+  return identifier.startsWith(LOCAL_SCHEME);
+}
+
+/**
+ * The file name behind a provided-source identifier, or a reason the identifier cannot be one.
+ *
+ * Deliberately strict: exactly one path segment, no separators and no `..`. A provided source
+ * names a file in the draft's own `sources/` directory, so anything that could point at a
+ * different part of the disk is refused here rather than resolved.
+ */
+export function localFileName(identifier: string): { name: string } | { problem: string } {
+  const name = identifier.startsWith(LOCAL_SCHEME) ? identifier.slice(LOCAL_SCHEME.length) : "";
+  if (name === "") return { problem: `provided source ${JSON.stringify(identifier)} names no file` };
+  if (name.includes("/") || name.includes("\\") || name.includes("..") || isAbsolute(name)) {
+    return { problem: `provided source ${JSON.stringify(identifier)} is not a plain file name` };
+  }
+  return { name };
+}
+
+/** The one normalisation both entrances and the validator use, so a hash means one thing. */
+export function normaliseProvidedText(text: string): string {
+  return text.replace(/\r\n/g, "\n").trim();
+}
+
+const PROVIDED_TEXT_MEDIA: Record<string, string> = {
+  ".md": "text/markdown",
+  ".markdown": "text/markdown",
+  ".txt": "text/plain",
+  ".text": "text/plain",
+  ".rst": "text/plain",
+};
+
+function providedMediaType(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot < 0 ? "text/plain" : PROVIDED_TEXT_MEDIA[name.slice(dot).toLowerCase()] ?? "text/plain";
+}
+
+function providedDocument(dir: string, name: string): FetchedDocument | { problem: string } {
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(join(dir, name));
+  } catch (error) {
+    return { problem: `could not be read: ${(error as Error).message}` };
+  }
+  const text = normaliseProvidedText(bytes.toString("utf8"));
+  if (text === "") return { problem: "has no readable text" };
+  return {
+    requested: `${LOCAL_SCHEME}${name}`,
+    url: `${LOCAL_SCHEME}${name}`,
+    fetchedAt: "",
+    mediaType: providedMediaType(name),
+    sha256: createHash("sha256").update(text).digest("hex"),
+    bytes: bytes.byteLength,
+    text,
+  };
+}
+
+/**
+ * Every text file in `dir`, read as provided documents, in sorted file-name order.
+ *
+ * Sorted so the build is reproducible: the order the operating system hands back a directory is
+ * not a fact about the corpus, and a `sourceIndex` that moved between two runs would make a
+ * reviewer's notes about "document 2" mean something different the second time.
+ *
+ * Text files only. A PDF, scan or spreadsheet in the directory is SKIPPED with a reason rather
+ * than read as mojibake — the Owner supplies text they have extracted, and the platform says so
+ * instead of pretending the bytes were words.
+ */
+export function readLocalDocuments(dir: string): { documents: FetchedDocument[]; skipped: string[] } {
+  if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+    throw new FetchRefused(`no directory of provided sources at ${dir}`);
+  }
+  const skipped: string[] = [];
+  const documents: FetchedDocument[] = [];
+  const names = readdirSync(dir)
+    .filter((name) => name !== "" && !name.startsWith("."))
+    .sort();
+  for (const name of names) {
+    if (!statSync(join(dir, name)).isFile()) continue;
+    const dot = name.lastIndexOf(".");
+    if (dot < 0 || !(name.slice(dot).toLowerCase() in PROVIDED_TEXT_MEDIA)) {
+      skipped.push(`${name} is not a text file (.md/.txt/.rst) — extract the text and put that in`);
+      continue;
+    }
+    const document = providedDocument(dir, name);
+    if ("problem" in document) {
+      skipped.push(`${name} ${document.problem}`);
+      continue;
+    }
+    documents.push(document);
+  }
+  if (documents.length === 0) {
+    throw new FetchRefused(
+      `no usable text files in ${dir}${skipped.length > 0 ? `:\n${skipped.map((s) => `  ${s}`).join("\n")}` : ""}`,
+    );
+  }
+  return { documents, skipped };
+}
+
 const DEFAULT_TIMEOUT_MS = 20_000;
+
 const DEFAULT_MAX_BYTES = 2_000_000;
 const USER_AGENT = "agent-teaching-platform domain-builder";
 

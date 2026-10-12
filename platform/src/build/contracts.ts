@@ -62,14 +62,36 @@ export interface DomainPlan {
   sources: PlannedSource[];
 }
 
-export function parseDomainPlan(text: string): DomainPlan {
+/**
+ * How a plan relates to sources — which depends on the entrance, not on the model (ADR 0016).
+ *
+ * `required` (the URL entrance): the plan names the documents the build will fetch.
+ * `forbidden` (the provided entrance): the documents are already in hand, so every one of them
+ * must be used and a plan naming sources would be a claim about a fetch that never happened.
+ * The model is told either way; this is the kernel refusing the claim rather than trusting it.
+ */
+export type SourcePolicy = "required" | "forbidden";
+
+export function parseDomainPlan(text: string, policy: SourcePolicy = "required"): DomainPlan {
   const parsed = parseJson(text, "domain plan");
   if (!isRecord(parsed)) throw new Error("domain plan must be an object");
-  if (!Array.isArray(parsed.sources) || parsed.sources.length === 0) {
+
+  if (policy === "forbidden") {
+    const listed = parsed.sources ?? [];
+    if (!Array.isArray(listed)) throw new Error("domain plan `sources` must be an array when present");
+    if (listed.length > 0) {
+      throw new Error(
+        "build.plan-from-conflict: the sources were provided to the build, so the plan may not name " +
+          "sources — every provided document is used, and a named one would be a claim about a fetch " +
+          "that never happened (ADR 0016)",
+      );
+    }
+  } else if (!Array.isArray(parsed.sources) || parsed.sources.length === 0) {
     throw new Error("domain plan must list at least one source");
   }
 
-  const sources = parsed.sources.map((raw, index) => {
+  const listed = Array.isArray(parsed.sources) ? parsed.sources : [];
+  const sources = listed.map((raw, index) => {
     const at = `domain plan source ${index}`;
     if (!isRecord(raw)) throw new Error(`${at} must be an object`);
     const url = oneLine(raw.url, `${at} \`url\``);

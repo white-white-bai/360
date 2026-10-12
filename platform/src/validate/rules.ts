@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -14,7 +15,7 @@ import {
   type ProfessionIndex,
   type ProfessionStatus,
 } from "../professions/load.ts";
-import { unusableSourceReason } from "../build/fetch.ts";
+import { isLocalSource, localFileName, normaliseProvidedText, unusableSourceReason } from "../build/fetch.ts";
 import type { Finding, Severity, ValidationReport } from "./types.ts";
 
 /**
@@ -198,7 +199,7 @@ function validateSourceManifest(dir: string, domain: Domain): Finding[] {
   const manifestPath = join(dir, "sources.json");
   if (!existsSync(manifestPath)) return findings;
 
-  let manifest: Array<{ requested?: unknown; url?: unknown }>;
+  let manifest: Array<{ requested?: unknown; url?: unknown; sha256?: unknown; text?: unknown }>;
   try {
     manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as typeof manifest;
   } catch (error) {
@@ -215,7 +216,52 @@ function validateSourceManifest(dir: string, domain: Domain): Finding[] {
   }
 
   for (const entry of manifest) {
-    if (typeof entry.url !== "string" || typeof entry.requested !== "string") continue;
+    if (typeof entry.url !== "string") continue;
+
+    // A PROVIDED source (ADR 0016): the second entrance's check. A file that is not there is
+    // the same failure as a URL that names an error page — a passage that traced here was
+    // never backed by a document — so it is the same code, at the same place.
+    if (isLocalSource(entry.url)) {
+      const where = `domains/${domain.id}/sources.json`;
+      const named = localFileName(entry.url);
+      // The build copied the provided file beside the draft and recorded WHERE it put it in the
+      // manifest's `text`. That recorded path is the file to check — reconstructing a name from
+      // the `local:` identifier would be a second opinion about where the build stores its work,
+      // and the two could drift. The original file name is still used as the human-facing label.
+      const label = "name" in named ? named.name : entry.url;
+      const stored = typeof entry.text === "string" ? entry.text : "";
+      if (!/^sources\/[^/\\]+$/.test(stored) || stored.includes("..")) {
+        findings.push(
+          finding("error", "corpus.source-unusable", where,
+            `provided source ${label}: the manifest does not record a usable \`sources/\` path (got ${JSON.stringify(stored)})`,
+            "rebuild the Domain so the manifest records where the provided file was copied"),
+        );
+        continue;
+      }
+      const file = join(dir, stored);
+      if (!existsSync(file)) {
+        findings.push(
+          finding("error", "corpus.source-unusable", where,
+            `provided source ${label} is not at domains/${domain.id}/${stored}`,
+            "put the file back — a passage that quoted it was never backed by a document"),
+        );
+        continue;
+      }
+      const text = normaliseProvidedText(readFileSync(file, "utf8"));
+      const sha = createHash("sha256").update(text).digest("hex");
+      if (typeof entry.sha256 === "string" && entry.sha256 !== sha) {
+        // Drift, not disproof: the file changed after it was quoted from. A warning, because
+        // what it means is "look at this", which is an owner's job rather than an error.
+        findings.push(
+          finding("warning", "corpus.source-changed", where,
+            `provided source ${label} no longer hashes to what the build recorded (${entry.sha256.slice(0, 12)}… → ${sha.slice(0, 12)}…)`,
+            "re-read the file — the corpus was quoted from a different version of it"),
+        );
+      }
+      continue;
+    }
+
+    if (typeof entry.requested !== "string") continue;
     const reason = unusableSourceReason(entry.url);
     if (reason !== undefined) {
       findings.push(
@@ -235,6 +281,12 @@ function validateSourceManifest(dir: string, domain: Domain): Finding[] {
       requested = new URL(entry.requested);
       resolved = new URL(entry.url);
     } catch {
+      // Neither http(s) nor `local:` — a scheme this platform has no entrance for.
+      findings.push(
+        finding("error", "corpus.source-unusable", `domains/${domain.id}/sources.json`,
+          `source ${JSON.stringify(entry.url)} is neither an http(s) URL nor a \`local:\` provided source`,
+          "a source is a fetched document or a file the Owner supplied (ADR 0010/0016)"),
+      );
       continue;
     }
     if (requested.host !== resolved.host) {

@@ -1,8 +1,8 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { DOMAINS_DIR, DOMAIN_DRAFTS_DIR } from "../catalog.ts";
+import { DOMAINS_DIR, DOMAIN_DRAFTS_DIR, REPO_ROOT } from "../catalog.ts";
 import { selectLiveProvider } from "../providers/live.ts";
 import type { LedgerRow } from "../providers/meter.ts";
 import { SpendMeter } from "../providers/meter.ts";
@@ -12,9 +12,9 @@ import { ReplyBudget } from "../session/retry.ts";
 import { loadRepoEnv } from "../util/local-env.ts";
 import { validateDraft } from "../validate/rules.ts";
 import type { Finding } from "../validate/types.ts";
-import type { DomainPlan, Pedagogy, SelectedPassage } from "./contracts.ts";
+import type { DomainPlan, Pedagogy, SelectedPassage, SourcePolicy } from "./contracts.ts";
 import { parseDomainPlan, parsePedagogy, parseSelection } from "./contracts.ts";
-import { httpFetcher } from "./fetch.ts";
+import { httpFetcher, readLocalDocuments } from "./fetch.ts";
 import type { FetchedDocument, Fetcher } from "./fetch.ts";
 import { MIN_QUOTE_CHARS, locateQuote } from "./quotes.ts";
 import { PENDING_CODES, writeDraftFiles } from "./write-domain.ts";
@@ -62,6 +62,42 @@ function plannerPrompt(topic: string): string {
       '"sources":[{"url":"https://...","why":"为什么这份文档有权威性"}]}',
     "`id` becomes a directory name: lowercase letters, digits and dashes only. `name` and",
     "`boundary` are written in the delivery language (zh).",
+  ].join("\n");
+}
+
+/**
+ * The planner's prompt when the documents were provided rather than fetched (ADR 0016).
+ *
+ * The model still decides what is teachable and where the boundary is — that is planning. It
+ * does NOT name sources: they are already in hand, and a plan that named them would be a claim
+ * about a fetch that never happened. The output contract simply has no `sources` key.
+ */
+function localPlannerPrompt(topic: string): string {
+  return [
+    "You plan a teaching Domain. A learner has asked for a topic, and you decide what a",
+    "teachable slice of it is. The documents are already in hand — the Owner provided them —",
+    "so you do NOT name sources.",
+    "",
+    "# The topic",
+    topic,
+    "",
+    "# What a Domain is",
+    "A small, boundaried body of material one sitting can teach and a check can decide: an",
+    "Assertion List cites its corpus passages, and the terminal checks are answerable from",
+    "them. Narrow is right — \"an industry\" is not a Domain.",
+    "",
+    "# What a source is",
+    "The documents were supplied as authority the learner can rest on — a standard, a",
+    "textbook, an official notice. You will not see them yet, and you do not choose them:",
+    "every one of them will be used. Your job is to say what the teachable slice is and",
+    "where its boundary lies.",
+    "",
+    "# Output contract",
+    JSON_ONLY,
+    '{"id":"kebab-case-id","name":"交付语言的短名","boundary":"一句话：教什么、不教什么"}',
+    "No `sources` key: the sources are provided and every one of them is used. `id` becomes a",
+    "directory name: lowercase letters, digits and dashes only. `name` and `boundary` are",
+    "written in the delivery language (zh).",
   ].join("\n");
 }
 
@@ -184,6 +220,12 @@ export interface BuildInput {
   topic: string;
   provider: ModelProvider;
   fetcher: Fetcher;
+  /**
+   * The second entrance (ADR 0016). When set, the documents come from this directory rather than
+   * the network, the plan may not name sources, and every later stage is the same code path. The
+   * path is interpreted relative to the repository root when it is not absolute.
+   */
+  local?: { dir: string };
   draftsDir?: string;
   domainsDir?: string;
   onStage?: (stage: BuildStage) => void;
@@ -214,12 +256,22 @@ export async function buildDomain(input: BuildInput): Promise<BuildResult> {
   const budget = input.budget ?? new ReplyBudget();
   const stage = (name: BuildStage): void => input.onStage?.(name);
 
+  // Which entrance this build uses (ADR 0016). It decides one thing: where the documents come
+  // from. Everything downstream — select, prove, author, write, validate — is the same code.
+  const local = input.local;
+  const sourcePolicy: SourcePolicy = local === undefined ? "required" : "forbidden";
+
   // 1 — the plan: what would this Domain be, and what would it rest on.
   stage("plan");
   const plan = await ask(
     meter,
-    { actor: ACTOR.planner, model: MODEL, system: plannerPrompt(input.topic), input: "Plan the Domain." },
-    parseDomainPlan,
+    {
+      actor: ACTOR.planner,
+      model: MODEL,
+      system: local === undefined ? plannerPrompt(input.topic) : localPlannerPrompt(input.topic),
+      input: "Plan the Domain.",
+    },
+    (text) => parseDomainPlan(text, sourcePolicy),
     budget,
   );
 
@@ -231,22 +283,30 @@ export async function buildDomain(input: BuildInput): Promise<BuildResult> {
     throw new Error(`\`${plan.id}\` is already a Domain — the builder would overwrite a signed one, so it refuses`);
   }
 
-  // 2 — fetch: the sources have to exist, and the network is what says so.
+  // 2 — fetch: the documents have to exist. The network says so at the URL entrance; the
+  // filesystem says so at the provided one. Same shape either way — one `FetchedDocument`.
   stage("fetch");
   const documents: FetchedDocument[] = [];
   const notes: string[] = [];
-  const seen = new Set<string>();
-  for (const source of plan.sources) {
-    if (seen.has(source.url)) continue;
-    seen.add(source.url);
-    try {
-      documents.push(await input.fetcher(source.url));
-    } catch (error) {
-      notes.push(`could not fetch ${source.url}: ${error instanceof Error ? error.message : String(error)}`);
+  if (local !== undefined) {
+    const sourceDir = isAbsolute(local.dir) ? local.dir : resolve(REPO_ROOT, local.dir);
+    const { documents: provided, skipped } = readLocalDocuments(sourceDir);
+    documents.push(...provided);
+    for (const skip of skipped) notes.push(`skipped ${skip}`);
+  } else {
+    const seen = new Set<string>();
+    for (const source of plan.sources) {
+      if (seen.has(source.url)) continue;
+      seen.add(source.url);
+      try {
+        documents.push(await input.fetcher(source.url));
+      } catch (error) {
+        notes.push(`could not fetch ${source.url}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
-  }
-  if (documents.length === 0) {
-    throw new Error(`no proposed source could be fetched, so there is nothing to quote from:\n${notes.map((n) => `  ${n}`).join("\n")}`);
+    if (documents.length === 0) {
+      throw new Error(`no proposed source could be fetched, so there is nothing to quote from:\n${notes.map((n) => `  ${n}`).join("\n")}`);
+    }
   }
 
   // 3 — select: the model may pick passages. It may not write them.
@@ -324,9 +384,20 @@ const STAGE_LABELS: Record<BuildStage, string> = {
 async function main(): Promise<void> {
   // The repo's local .env first: a key that lives there is found before anything asks for one.
   loadRepoEnv();
-  const topic = process.argv.slice(2).join(" ").trim();
-  if (topic === "") {
+
+  // `--from <dir>` picks the second entrance (ADR 0016); everything else is the topic.
+  const argv = process.argv.slice(2);
+  const fromIndex = argv.indexOf("--from");
+  const from =
+    fromIndex >= 0
+      ? (argv[fromIndex + 1] ?? "")
+      : undefined;
+  if (fromIndex >= 0) argv.splice(fromIndex, from === "" ? 1 : 2);
+
+  const topic = argv.join(" ").trim();
+  if (topic === "" || (fromIndex >= 0 && from === "")) {
     console.error('用法：npm run build-domain -- "<你想教的主题>"');
+    console.error('  （人工备语料：npm run build-domain -- --from <目录> "<你想教的主题>"）');
     process.exitCode = 1;
     return;
   }
@@ -341,17 +412,21 @@ async function main(): Promise<void> {
 
   console.log(`\n现做一份教材：${topic}`);
   console.log(`provider  ${live.describe}`);
+  if (from !== undefined) console.log(`语料      ${from}（人工提供：不抓网，同一套引文证明照跑）`);
 
   const result = await buildDomain({
     topic,
     provider: live.provider,
     fetcher: httpFetcher(),
+    local: from === undefined ? undefined : { dir: from },
     onStage: (stage) => console.log(`  ${STAGE_LABELS[stage]}`),
   });
 
   console.log(`\n草稿    ${result.dir}`);
   console.log(`  名称  ${result.plan.name}`);
-  console.log(`  来源  ${result.documents.length} 份（抓取成功；引文全部在原文中找到）`);
+  console.log(
+    `  来源  ${result.documents.length} 份（${from === undefined ? "抓取成功" : "人工提供"}；引文全部在原文中找到）`,
+  );
   for (const note of result.notes) console.log(`        跳过 ${note}`);
   console.log(`  段落  ${result.passages.length}`);
   console.log(

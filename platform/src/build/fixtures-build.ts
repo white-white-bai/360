@@ -47,6 +47,16 @@ export const BUILD_PLAN_TWIN = JSON.stringify({
   ],
 });
 
+/**
+ * The plan for the provided entrance (ADR 0016): the same Domain, and NO `sources` key —
+ * every provided document is used, so the plan has no source to name.
+ */
+export const BUILD_LOCAL_PLAN = JSON.stringify({
+  id: "token-length-local",
+  name: "记号与长度（人工语料）",
+  boundary: "只教记号的定义与长度如何计算，不涉及存储格式。",
+});
+
 export const BUILD_SELECTION = JSON.stringify({
   passages: [
     {

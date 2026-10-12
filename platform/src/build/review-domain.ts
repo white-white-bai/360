@@ -9,6 +9,7 @@ import { loadDomain } from "../experts/load.ts";
 import { validateDraft } from "../validate/rules.ts";
 import type { Finding } from "../validate/types.ts";
 import { parseFrontmatter } from "../util/frontmatter.ts";
+import { isLocalSource, localFileName } from "./fetch.ts";
 import { PENDING_CODES } from "./write-domain.ts";
 
 /**
@@ -243,8 +244,17 @@ async function main(): Promise<void> {
   console.log(`  ${report.boundary}`);
   console.log(`\n来源（原文在 sources/ 里，逐条已由内核验过引文）：`);
   for (const source of report.sources) {
-    console.log(`  [${source.index}] ${source.url}`);
-    console.log(`      抓取于 ${source.fetchedAt} · sha256 ${source.sha256.slice(0, 12)}…`);
+    // A provided source is a file a person gave, not a page a person can open (ADR 0016), so it
+    // is shown as a file name rather than as a URL — the reviewer's list should name what to look
+    // at, and for a provided document that is a name in sources/, not a scheme.
+    const provided = isLocalSource(source.url) ? localFileName(source.url) : undefined;
+    const label = provided !== undefined && "name" in provided ? `${provided.name}（人工提供）` : source.url;
+    console.log(`  [${source.index}] ${label}`);
+    console.log(
+      source.fetchedAt === ""
+        ? `      sha256 ${source.sha256.slice(0, 12)}…（构建时记录）`
+        : `      抓取于 ${source.fetchedAt} · sha256 ${source.sha256.slice(0, 12)}…`,
+    );
   }
   console.log(`\n语料段落（${report.domain.corpus.passages.length}）：`);
   for (const passage of report.domain.corpus.passages) {
