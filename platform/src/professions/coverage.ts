@@ -75,18 +75,38 @@ export function signaturesOnDisk(domainsDir: string = DOMAINS_DIR): Signatures {
   // takes this answer — an unreadable shelf opens nothing.
   if (!existsSync(domainsDir)) return { signed: new Set(), coSigned: new Set() };
 
+  // The second signature is a FIELD, so it costs a load; the first is the
+  // directory, which costs a listing. Both facts are read from one scan
+  // (`loadDomainsOnDisk` lists the directory) so the two sets cannot drift.
   const signed = new Set<string>();
-  const coSigned = new Set<string>();
+  for (const entry of readdirSync(domainsDir, { withFileTypes: true })) {
+    if (entry.isDirectory()) signed.add(entry.name);
+  }
+  return { signed, coSigned: coSignedDomainIds(loadDomainsOnDisk(domainsDir)) };
+}
+
+/**
+ * Every Domain on the shelf that loads, in directory order.
+ *
+ * A Domain that will not load is skipped, not thrown on — the same
+ * failing-closed posture `signaturesOnDisk` takes, and for the same reason: a
+ * caller asking a question about the shelf must get an answer, and the validator
+ * is where the unreadable file is named. A missing `domains/` is no Domains.
+ */
+export function loadDomainsOnDisk(domainsDir: string = DOMAINS_DIR): Domain[] {
+  if (!existsSync(domainsDir)) return [];
+
+  const domains: Domain[] = [];
   for (const entry of readdirSync(domainsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    signed.add(entry.name);
     try {
-      if (hasTwoReviewers(loadDomain(join(domainsDir, entry.name)))) coSigned.add(entry.name);
+      domains.push(loadDomain(join(domainsDir, entry.name)));
     } catch {
-      // Signed, single-reviewed. Not a silent failure — the validator names it.
+      // Unreadable. Signed as a directory, single-reviewed as a Domain — the
+      // validator names why it would not load.
     }
   }
-  return { signed, coSigned };
+  return domains;
 }
 
 /** The co-signed ids among Domains a caller has already loaded — no second read. */

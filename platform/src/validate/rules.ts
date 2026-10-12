@@ -16,6 +16,7 @@ import {
   type ProfessionStatus,
 } from "../professions/load.ts";
 import { coSignedDomainIds } from "../professions/coverage.ts";
+import { reviewLedger, todayISO, type ReviewEntry } from "../professions/review.ts";
 import { isPlaceholder } from "../util/placeholder.ts";
 import { isLocalSource, localFileName, normaliseProvidedText, unusableSourceReason } from "../build/fetch.ts";
 import type { Finding, Severity, ValidationReport } from "./types.ts";
@@ -534,6 +535,7 @@ function validateDomain(
   domain: Domain,
   dir: string,
   listedDomainIds: ReadonlySet<string> | undefined,
+  review?: ReviewEntry,
 ): Finding[] {
   const findings: Finding[] = [
     ...validateCorpus(domain, dir),
@@ -571,10 +573,31 @@ function validateDomain(
     );
   }
 
+  // ADR 0018: a signature is a statement about a corpus at a date, and the
+  // documents underneath it are not frozen. A WARNING and never an error, and it
+  // closes nothing: a validator that failed the build because nobody had re-read
+  // a Domain since last spring would be switched off inside a week, and would
+  // then stop reporting the errors it shares a run with. `review` is absent when
+  // there is no clock to read against — a draft (`validateDraft`), or a
+  // catalogue that would not load and so cannot set anyone's pace.
+  if (review !== undefined && review.overdue) {
+    findings.push(
+      finding(
+        "warning",
+        "corpus.review-overdue",
+        where,
+        `the corpus is ${review.daysOverdue} day(s) past review: last read ${review.anchor}, due ${review.dueOn} on a ${review.intervalDays}-day interval`,
+        `re-read it against its sources, then update corpusReviewedOn — ${
+          review.pace === undefined
+            ? "no Profession lists this Domain, so it runs at the base rate"
+            : `${review.pace.name} (${review.pace.id}) sets the interval here`
+        }; a second reviewer's signature is also a read`,
+      ),
+    );
+  }
+
   return findings;
 }
-
-/** The source URLs a Domain recorded — its manifest, or the ones in its meta. */
 function domainSourceUrls(domain: Domain, dir: string): Set<string> {
   const urls = new Set<string>();
   const manifestPath = join(dir, "sources.json");
@@ -957,6 +980,13 @@ export interface ValidateOptions {
   professionsFile?: string;
   /** Defaults to the repo's Competency asset (ADR 0015). */
   competenciesFile?: string;
+  /**
+   * The date the review clock is read against, as `YYYY-MM-DD`. Defaults to
+   * today. An argument rather than a call to the clock (ADR 0018 decision 5):
+   * a rule whose only test is "freeze the system clock and hope" is a rule that
+   * gets tested once and then never again.
+   */
+  today?: string;
 }
 
 /**
@@ -1053,8 +1083,21 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
       : new Set(
           [...professions.value.professions.values()].flatMap((profession) => profession.domainIds),
         );
+
+  // ADR 0018: each Domain's clock, computed once by the same function
+  // `npm run coverage` prints — so the warning a person reads here and the
+  // 待复审 section there cannot describe one Domain two ways. With no catalogue
+  // there is no pace to set, so there is no clock, and the rule stays quiet
+  // rather than inventing a deadline (the `listed === undefined` reading above).
+  const reviewById = new Map<string, ReviewEntry>(
+    (professions.value === undefined
+      ? []
+      : reviewLedger(professions.value, loadedDomains.map(({ domain }) => domain), options.today ?? todayISO())
+    ).map((entry) => [entry.domain.id, entry]),
+  );
+
   for (const { domain, dir } of loadedDomains) {
-    findings.push(...validateDomain(domain, dir, listed));
+    findings.push(...validateDomain(domain, dir, listed, reviewById.get(domain.id)));
   }
 
   if (professions.value !== undefined) {

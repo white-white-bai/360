@@ -126,6 +126,10 @@ _Avoid_: Author, maintainer, admin
 The named person who has read a Domain's corpus and signed for it. A Domain is **co-signed** when it carries two reviewers with different names, neither a placeholder — the backing a high-risk Profession needs to open. Independence is an attestation: the platform can check that two names differ, and it can never check that they are two people.
 _Avoid_: Approver, auditor, validator, signer
 
+**Review Interval**:
+How long a Domain's signature stays good, in whole days. Two dials answer it separately — Tier for how much of a Profession can be taught here, Risk for what happens if the platform teaches it wrong — and the shorter answer wins. A Domain's interval is the strictest among the Professions that list it; a Domain no Profession lists runs at the base rate, which is the Tier A ordinary rate (365 days). The clock starts at the Domain's most recent read, so a second signature resets it. An interval that has elapsed past its due date is **overdue** — a maintenance signal and never a coverage claim: it says the reading is old, not that it was wrong, and it opens no door and closes none (ADR 0018).
+_Avoid_: Expiry, TTL, shelf life, freshness, review cycle, deadline
+
 ### The blackboard
 
 **Blackboard**:
