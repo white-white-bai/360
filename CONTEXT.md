@@ -96,6 +96,10 @@ _Avoid_: Analogy, metaphor, example, illustration
 The curated material a Domain's assertions must trace to, each passage carrying its provenance.
 _Avoid_: Knowledge base, dataset, training data, content library, docs
 
+**Provided Source**:
+A document the Owner supplied to the builder as a file — a standard, a textbook, an official notice — rather than a URL the builder fetched. Backed by the same kernel check as a fetched source: the file must exist and its recorded hash must match. Recorded under the local: scheme.
+_Avoid_: Local source, manual source, pasted text, attachment
+
 **Misconception**:
 A named way learners typically get a Domain wrong, together with how it is refuted. Gives the Challenger a target and gives an Understanding Check something to diagnose against.
 _Avoid_: Error, mistake, wrong answer, confusion, edge case
