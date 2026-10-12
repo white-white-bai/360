@@ -11,8 +11,16 @@ The set of Domains a learner may choose from at entry. Its length is an honest s
 _Avoid_: Menu, marketplace, store, list
 
 **Profession**:
-The industry a learner names at entry — the door, not the lesson. A Profession holds a tier, a risk, a boundary (what will NOT be taught here), and a list of Domains. Its status is computed, never stored: open when a listed Domain is signed, planned when none is, closed when its risk is high. The skeleton is the official occupation classification; folk names ("三百六十行") are aliases, not taxonomy.
+The industry a learner names at entry — the door, not the lesson. A Profession holds a tier, a risk, a boundary (what will NOT be taught here), a list of Domains, and a Capability Map. Its status is computed, never stored: open when a listed Domain is signed, planned when none is, closed when its risk is high. The skeleton is the official occupation classification; folk names ("三百六十行") are aliases, not taxonomy.
 _Avoid_: Industry, job, career, trade
+
+**Competency**:
+A must-know-and-be-able-to-apply unit of a Profession, linked to the units that come before it. The middle layer between Profession and Domain. Each unit names the Domains that teach it and, where the platform cannot teach it at all, where it is learned instead. Its status is computed the same way a Profession's is: covered when at least one Domain that teaches it is signed.
+_Avoid_: Skill, topic, module, unit, learning objective
+
+**Capability Map**:
+What one Profession's learning looks like from here: the Competencies covered by signed Domains, and — shown just as plainly — the parts the platform does not teach and what teaches them. The untaught half is the difference between a map and a syllabus.
+_Avoid_: Curriculum, syllabus, outline, roadmap, learning path
 
 **Tier**:
 How much of a Profession can be taught: A — text-verifiable knowledge, the full apparatus; B — standards-and-diagrams knowledge, taught with the note that it does not replace practice; C — embodied skill, where only the cognitive layer is taught and the boundary says so. Tier is independent of Risk.
