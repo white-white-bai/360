@@ -35,11 +35,12 @@ npm run board                    # the board → http://localhost:18087/  (?live
 npm test                         # node --test over test/
 npm run typecheck                # tsc --noEmit
 npm run validate                 # check every knowledge asset; exits non-zero on ERRORS, zero on warnings
-npm run coverage                 # the coverage ledger: per Profession, covered / planned / beyond (ADR 0015)
+npm run coverage                 # the coverage ledger: per Profession covered / planned / beyond, plus 待复审 (ADR 0015/0018)
 npm run enter                    # terminal teaching session (-- --followup <sessionId> to resume one)
 npm run classroom -- "topic"     # the direct classroom (ADR 0011)
-npm run build-domain -- "<topic>"   # build a signable draft on demand from fetched sources (ADR 0010)
+npm run build-domain -- "<topic>"   # build a signable draft on demand from fetched sources (ADR 0010); `--from <dir>` takes the second entrance, sources a person provides (ADR 0016)
 npm run review-domain -- <id>       # review and sign a draft into the catalogue
+npm run counter-sign -- <id>        # the second signature, a different named reviewer (ADR 0017)
 npm run probe                    # provider self-check: endpoint/model/key length, one minimal call each
 ```
 
@@ -64,7 +65,11 @@ npm run probe                    # provider self-check: endpoint/model/key lengt
 
 ## Architecture
 
-**The platform kernel** (`platform/src/`) is organized around the event protocol, not the UI: `events/` (the typed vocabulary and the log), `session/` (the turn loop, prompts, retries, the store), `render/` (events → `Surface` → text/HTML), `grounding/` + `assertions/` (traceability), `experts/` (the Persona × Domain × Style axes), `build/` + `validate/` (the draft→sign pipeline), `providers/` (one adapter per wire protocol, plus `fake`/`scripted` for tests), and `ui/` (the board — a *consumer* of the kernel, not part of it). Knowledge paths resolve via `src/catalog.ts`, relative to the module, never the process CWD. The validation rules live in `src/validate/rules.ts`.
+**The platform kernel** (`platform/src/`) is organized around the event protocol, not the UI: `events/` (the typed vocabulary and the log), `session/` (the turn loop, prompts, retries, the store), `render/` (events → `Surface` → text/HTML), `grounding/` + `assertions/` (traceability), `experts/` (the Persona × Domain × Style axes), `professions/` (the layers above a Domain: `load.ts` for the Profession catalogue and the Competency units, `coverage.ts` for the ledger, `review.ts` for the review lifecycle), `build/` + `validate/` (the draft→sign pipeline), `providers/` (one adapter per wire protocol, plus `fake`/`scripted` for tests), and `ui/` (the board — a *consumer* of the kernel, not part of it). Knowledge paths resolve via `src/catalog.ts`, relative to the module, never the process CWD. The validation rules live in `src/validate/rules.ts`.
+
+Three layers stack above a Domain — **Profession → Competency → Domain** (ADR 0012/0015). A Profession is the door; a Competency is a teachable unit with prerequisites and a declaration of where it is learned when the platform cannot teach it; a Domain is the corpus that backs one. Only the Domain is authored content the kernel checks. **A Profession's status, and a Competency's, are computed from signatures and never stored**, which is why `coverage.ts` reads the disk rather than a field. The layers above the Domain must never be allowed to *assert* — the Capability Map says what can be taught, and the corpus check still decides what may be said.
+
+**There are two ways a corpus comes into being** (ADR 0016), and they differ only in where the documents came from: the builder either fetches public sources (ADR 0010) or takes files a person supplies under `sources/`. Both run the *same* quote-proving kernel — the model selects and edits, it never writes corpus text — and both produce an unsigned draft; `review-domain` remains the only door into `domains/`, and `counter-sign` (ADR 0017) is the second, independent signature a high-risk Profession needs. **A signature has a shelf life** (ADR 0018): Tier and Risk each set an interval, the shorter wins, and an elapsed interval is a warning that closes nothing.
 
 **The agent graph** (`agent/src/agent/graph/`): a bounded ReAct loop. `chat` is `lead → end`. `grounded` is `lead ─(tool calls)▶ tools ─▶ lead … ─▶ verify ─(one revision)▶ … ─▶ end`. `max_steps` (default 4) bounds the model calls and `verify` bounds the arguing — the loop cannot run forever, which matters most because it spends money. State persists in LangGraph's SQLite checkpointer (`agent/.state/`, gitignored), so `--thread <id>` resumes across processes.
 
@@ -87,13 +92,13 @@ Gotchas recorded in the READMEs, worth not rediscovering: **Claude models answer
 
 - `platform/` — TypeScript kernel, sessions, builder, validator, providers, board
 - `agent/` — Python service: RAG, LangGraph, tools, MCP server, Gradio page, evals, deploy
-- `domains/<id>/` — `meta.md`, `corpus.md`, `misconceptions.md`, `glossary.md`, `checks.md` (plus `sources.json` and a gitignored `sources/` for built Domains)
+- `domains/<id>/` — `meta.md`, `corpus.md`, `misconceptions.md`, `glossary.md`, `checks.md` (plus `sources.json` and a gitignored `sources/` — fetched for a built Domain, or supplied by a person under ADR 0016)
 - `domains-draft/` — unsigned drafts (gitignored)
 - `library/personas/`, `library/styles/` — the product-wide axes, owned separately from any Domain
 - `professions/professions.md` — the industry catalogue (ADR 0012); a Profession's status is computed from signatures, never stored
 - `professions/competencies.md` — the Competency layer (ADR 0015): the Capability Map's units, their prerequisites, and what each does *not* teach; status is computed the same way a Profession's is
 - `platform/.sessions/` — learner records (gitignored, SENSITIVE); the agent reads them read-only
-- `docs/adr/` — decisions 0001–0015; `CONTEXT.md` — the glossary the code's and docs' vocabulary must follow
+- `docs/adr/` — decisions 0001–0018; `CONTEXT.md` — the glossary the code's and docs' vocabulary must follow
 - `.commandcode/skills/` — this repo's engineering skills. ADR 0001 settled that this is an **asset library for expert roles, not part of the delivery vehicle**; the platform never imports from it. `.commandcode/taste/` — local working preferences (gitignored) — read before doing work, don't duplicate them into docs.
 
 ## House rules
