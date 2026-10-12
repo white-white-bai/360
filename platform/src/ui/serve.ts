@@ -186,8 +186,15 @@ export function createBoardServer(options: BoardOptions = {}): Server {
 
   // What a session may be started with (ADR 0009). The list is configuration, not a discovery
   // call: it says what this deployment is willing to run and pay for.
-  const models = options.models ?? configuredModels(process.env);
-  const modelDefault = options.models !== undefined ? (models[0] ?? null) : defaultModel(process.env);
+  //
+  // The list is the PROVIDER's, and /options reports `live` the same way (`selection !== null ||
+  // options.provider !== undefined`): offering a model with no provider behind it is a lie the
+  // selector tells. A machine with `ATP_MODEL` set but no key — the shape a stale `setx` leaves
+  // behind — must offer none, not one the board cannot start.
+  const hasProvider = options.provider !== undefined || selectLiveProvider(process.env) !== null;
+  const models = options.models ?? (hasProvider ? configuredModels(process.env) : []);
+  const modelDefault =
+    options.models !== undefined ? (models[0] ?? null) : hasProvider ? defaultModel(process.env) : null;
 
   // Where drafts live: what the page may LIST as waiting for a signature (ADR 0010), and where
   // a build writes. One path, so the shelf the page shows is the shelf the builder fills.
