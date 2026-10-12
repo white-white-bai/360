@@ -9,7 +9,7 @@ neverTranslate:
 
 # Glossary — time stamps, time zones and daylight saving
 
-ADR 0004 / ADR 0018: the corpus stays in its source language (English), the
+ADR 0004 / ADR 0006: the corpus stays in its source language (English), the
 teaching is delivered in Chinese, and this file pins the renderings so the
 translation cannot drift. Identifiers are not descriptions — they are citations,
 and they are listed under `neverTranslate` instead.

@@ -9,12 +9,12 @@ import { MEANINGFUL_RETENTION_HOURS, measureFollowUp } from "../session/measure.
 import { ModelReplyUnusable, ReplyBudget } from "../session/retry.ts";
 
 /**
- * The ablation experiment (ADR 0001, ADR 0015).
+ * The ablation experiment (ADR 0001).
  *
  * ADR 0001 accepts v1 by comparing one set of claims under two conditions, and
- * ADR 0015 says any piece of the apparatus that shows no difference against the
- * baseline should be deleted. Both need the same thing: a way to switch pieces
- * off and measure.
+ * says in the same breath that any piece of the apparatus showing no difference
+ * against the baseline should be deleted. Both need the same thing: a way to
+ * switch pieces off and measure.
  *
  * The claims are INJECTED rather than generated per run, and that is the point of
  * the whole design here. If each condition produced its own claims, a difference
@@ -379,7 +379,7 @@ export interface Comparison {
   baseline: ConditionSummary;
   apparatus: ConditionSummary;
   /**
-   * The verdict ADR 0015 asks for, stated rather than left to the reader.
+   * The verdict ADR 0001 asks for, stated rather than left to the reader.
    *
    * It is deliberately conservative: with too few trials, or with no difference,
    * nothing is concluded — because "the apparatus helped" on three fixture runs is
@@ -485,7 +485,7 @@ export function compare(trials: readonly TrialResult[], minTrialsPerCondition = 
       caveat,
       verdict: "no-difference",
       reason:
-        "the apparatus did not change the pass rate. Per ADR 0015, a piece of apparatus that shows no " +
+        "the apparatus did not change the pass rate. Per ADR 0001, a piece of apparatus that shows no " +
         "difference should be deleted — though with this few trials, first check whether the measurement " +
         "can see a difference at all.",
     };

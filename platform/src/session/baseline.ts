@@ -26,7 +26,7 @@ const MODEL = "mid";
  * Three things it must carry, each traceable to a decision:
  *   - Persona and Style, as separate blocks, so the axes stay swappable (ADR 0006)
  *   - the corpus passages WITH their ids, so an assertion can be traced back (ADR 0004)
- *   - the Term Glossary and the never-translate list (ADR 0018)
+ *   - the Term Glossary (ADR 0006) and the never-translate identifiers (ADR 0004)
  *
  * It also states the output contract, because narration and blackboard events
  * arrive interleaved in one payload (ADR 0005), and lists the closed event

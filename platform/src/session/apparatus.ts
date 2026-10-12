@@ -36,9 +36,9 @@ const MODEL = "mid";
 /**
  * The pieces of the apparatus that can be switched off, one at a time.
  *
- * This exists because of ADR 0015: "any piece that shows no measurable difference
+ * This exists because of ADR 0001: "any piece that shows no measurable difference
  * against the baseline should be deleted", which is only checkable if each piece
- * can be removed on its own. Switching all three off is the baseline of ADR 0001.
+ * can be removed on its own. Switching all three off is its baseline condition.
  *
  * Note what is NOT switchable. The structural verification of the assertion list
  * stays on in every condition: it is a guard, not a teaching device, and it can
@@ -425,7 +425,7 @@ export interface ApparatusResult {
 }
 
 /**
- * The apparatus (ADR 0003, 0005, 0009, 0013, 0015).
+ * The apparatus (ADR 0001, 0003, 0005, 0009, 0013).
  *
  * Order is the whole design, so it is worth reading as a sequence:
  *

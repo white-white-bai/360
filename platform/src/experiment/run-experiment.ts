@@ -53,7 +53,7 @@ async function main(): Promise<void> {
   // transfer.
   const transferCheck = findCheck(expert.domain.checks, "T-fixed-offset");
 
-  console.log("Ablation experiment (ADR 0001, ADR 0015)");
+  console.log("Ablation experiment (ADR 0001)");
   console.log(`  expert   ${describeExpert(expert)}`);
   console.log(`  check    ${check.id} — the same hand-authored asset in every trial`);
   console.log(`  retake   ${retakeCheck.id} — a DIFFERENT situation, so a pass after remediation`);
