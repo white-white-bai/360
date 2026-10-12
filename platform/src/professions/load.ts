@@ -40,6 +40,17 @@ export interface Profession {
   /** Signed Domains only. A draft is not coverage. */
   domainIds: string[];
   aliases: string[];
+  /**
+   * Who may review this line — the Owner's allocation, written down rather than
+   * remembered (ADR 0017 decision 6), because the same key that signs also
+   * decides who else may.
+   *
+   * Only one rule reads it: a high-risk Profession that lists Domains must name
+   * at least TWO DISTINCT people (`profession.reviewers-insufficient`). An
+   * ordinary Profession carries a roster too — the person who signs it — and no
+   * rule constrains it, because there is nothing to constrain.
+   */
+  reviewers: string[];
 }
 
 export interface ProfessionIndex {
@@ -72,6 +83,9 @@ function professionOf(section: Section): Profession {
     domainIds: (data.domains as string[] | undefined) ?? [],
     // A folk name is optional: not every profession has one.
     aliases: (data.aliases as string[] | undefined) ?? [],
+    // Optional too — but for a high-risk line the validator requires two, so an
+    // empty roster here is a finding rather than a silent absence.
+    reviewers: (data.reviewers as string[] | undefined) ?? [],
   };
 }
 
@@ -216,16 +230,57 @@ export function orderCompetencies(units: Competency[]): Competency[] {
   return ordered;
 }
 
+const NO_DOMAINS: ReadonlySet<string> = new Set();
+
 /**
- * Status from signatures and risk, never from a field (ADR 0012):
- * high-risk is closed until two independent reviewers can sign — which
- * no Domain can do today, since each records exactly one reviewer.
+ * The signature facts a status decision reads (ADR 0017).
+ *
+ * Two sets rather than one because they answer two different questions — "is
+ * this Domain signed at all?" and "does it carry a second reviewer?" — and a
+ * high-risk Profession needs both answers.
+ *
+ * In practice `coSigned` is a subset of `signed`: both are read off the same
+ * scan of `domains/`, and a Domain carrying two reviewers carries one. The type
+ * says nothing about that on purpose — the status rule is worth reading on its
+ * own terms rather than as a consequence of how the callers happen to build it.
+ */
+export interface Signatures {
+  signed: ReadonlySet<string>;
+  coSigned: ReadonlySet<string>;
+}
+
+/** What a caller with no disk to read sees: every high-risk line closed. */
+export const NO_SIGNATURES: Signatures = { signed: NO_DOMAINS, coSigned: NO_DOMAINS };
+
+/**
+ * Status from signatures and risk, never from a field (ADR 0012/0017):
+ * high-risk is closed until EVERY Domain it lists carries a second reviewer.
+ *
+ * That is what makes `closed` mean "high-risk with no two-reviewer backing"
+ * rather than "high risk, full stop" — the constant ADR 0012 decision 5 wrote
+ * down because no Domain could hold a second name, and ADR 0017 replaced once
+ * one could.
+ *
+ * EVERY, not any: a Profession listing three Domains where one is co-signed and
+ * two are not is still teaching two unbacked slices of a subject where being
+ * wrong hurts. And at least one must be signed, because a Domain that no one
+ * has signed for teaches nothing at all — the ordinary rule, still enforced.
+ *
+ * The co-signed set defaults to empty, so a caller with no disk to read gets the
+ * answer that was true before the second signature existed: closed.
  */
 export function professionStatus(
   profession: Profession,
   signedDomainIds: ReadonlySet<string>,
+  twoReviewerDomainIds: ReadonlySet<string> = NO_DOMAINS,
 ): ProfessionStatus {
-  if (profession.risk === "high") return "closed";
+  if (profession.risk === "high") {
+    const backed =
+      profession.domainIds.length > 0 &&
+      profession.domainIds.every((id) => twoReviewerDomainIds.has(id)) &&
+      profession.domainIds.some((id) => signedDomainIds.has(id));
+    return backed ? "open" : "closed";
+  }
   return profession.domainIds.some((id) => signedDomainIds.has(id)) ? "open" : "planned";
 }
 
@@ -330,14 +385,14 @@ const NO_COMPETENCIES: CompetencyIndex = { competencies: new Map() };
 
 export function professionOptions(
   index: ProfessionIndex,
-  signedDomainIds: ReadonlySet<string>,
+  signatures: Signatures = NO_SIGNATURES,
   competencies: CompetencyIndex = NO_COMPETENCIES,
 ): ProfessionOption[] {
   const options: ProfessionOption[] = [];
   for (const profession of index.professions.values()) {
     const category = index.categories.get(profession.categoryId);
-    const status = professionStatus(profession, signedDomainIds);
-    const units = competencyOptionsOf(profession.id, competencies, signedDomainIds);
+    const status = professionStatus(profession, signatures.signed, signatures.coSigned);
+    const units = competencyOptionsOf(profession.id, competencies, signatures.signed);
     options.push({
       id: profession.id,
       label: profession.name,
@@ -356,9 +411,16 @@ export function professionOptions(
 }
 
 /**
- * The door rule for closed Professions (ADR 0012): a topic that resolves
- * to a high-risk Profession is refused at BOTH doors — the board's build
- * path and the direct classroom — before any model is called.
+ * The door rule for closed Professions (ADR 0012, re-cut by ADR 0017): a topic
+ * that resolves to a CLOSED Profession is refused at BOTH doors — the board's
+ * build path and the direct classroom — before any model is called.
+ *
+ * It reads the STATUS, not the risk. That is the whole of ADR 0017 decision 4:
+ * once a line is backed by two reviewers it is open, and an open door is a door
+ * by construction rather than by exemption. A high-risk line that is still
+ * single-reviewed refuses with exactly the sentence it has always given, and the
+ * default — no signatures at all — is every high-risk line still closed, which
+ * is what a caller with no disk to read should see.
  *
  * Matching is containment on names and aliases, the same conservative rule
  * `matchTopic` uses everywhere else: a wrong refusal is annoying, but a
@@ -368,6 +430,7 @@ export function professionOptions(
 export function highRiskRefusal(
   index: ProfessionIndex,
   topic: string,
+  signatures: Signatures = NO_SIGNATURES,
 ): string | undefined {
   const entries: Array<{ id: string; name: string }> = [];
   for (const profession of index.professions.values()) {
@@ -380,13 +443,17 @@ export function highRiskRefusal(
   const match = matchTopic(entries, topic);
   if (match.kind === "none") return undefined;
   const ids = new Set(match.kind === "one" ? [match.id] : match.ids);
-  const risky = [...ids]
+  const closed = [...ids]
     .map((id) => index.professions.get(id))
-    .filter((profession): profession is Profession => profession !== undefined && profession.risk === "high");
-  if (risky.length === 0) return undefined;
+    .filter(
+      (profession): profession is Profession =>
+        profession !== undefined &&
+        professionStatus(profession, signatures.signed, signatures.coSigned) === "closed",
+    );
+  if (closed.length === 0) return undefined;
 
   return (
-    `「${risky.map((profession) => profession.name).join("、")}」是高风险行业：教错了会有后果。` +
+    `「${closed.map((profession) => profession.name).join("、")}」是高风险行业：教错了会有后果。` +
     "在两名独立审核人签字之前，平台不开放这一行——直接课堂也一样。"
   );
 }

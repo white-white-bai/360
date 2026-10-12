@@ -66,6 +66,8 @@ domains:
 aliases:
   - 程序员
   - 软件工程师
+reviewers:
+  - 白杨
 
 ## accountant
 kind: profession
@@ -77,6 +79,8 @@ boundary: 教会计准则、账务处理与报表阅读，以公开准则为语�
 aliases:
   - 会计
   - 出纳
+reviewers:
+  - 白杨
 
 ## teacher
 kind: profession
@@ -85,6 +89,8 @@ category: professional
 tier: A
 risk: ordinary
 boundary: 教教学设计与课堂组织的一般方法，以公开教育研究为语料；不教某一学科的应试技巧与学校管理
+reviewers:
+  - 白杨
 
 ## electrician
 kind: profession
@@ -96,6 +102,8 @@ boundary: 只教认知层——电路原理、安全规程与故障判断的文�
 aliases:
   - 维修电工
   - 低压电工
+reviewers:
+  - 白杨
 
 ## auto-mechanic
 kind: profession
@@ -107,6 +115,8 @@ boundary: 只教认知层——机械原理、故障码与维修规程的文字�
 aliases:
   - 汽修工
   - 汽车修理工
+reviewers:
+  - 白杨
 
 ## cook
 kind: profession
@@ -118,6 +128,8 @@ boundary: 只教认知层——食材特性、火候与食品安全知识；刀�
 aliases:
   - 厨师
   - 中餐厨师
+reviewers:
+  - 白杨
 
 ## hairdresser
 kind: profession
@@ -129,6 +141,8 @@ boundary: 只教认知层——发型理论、头皮与发质知识、卫生规�
 aliases:
   - 理发师
   - 美发师
+reviewers:
+  - 白杨
 
 ## carpenter
 kind: profession
@@ -139,6 +153,8 @@ risk: ordinary
 boundary: 只教认知层——木材特性、结构与榫卯知识、安全规程；手艺必须上手，本平台不替代
 aliases:
   - 木匠
+reviewers:
+  - 白杨
 
 ## nurse
 kind: profession

@@ -23,6 +23,7 @@ import {
   type CompetencyIndex,
   type ProfessionIndex,
 } from "../professions/load.ts";
+import { signaturesOnDisk } from "../professions/coverage.ts";
 import { ScriptedProvider } from "../providers/scripted.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import { render } from "../render/render.ts";
@@ -232,6 +233,19 @@ export function createBoardServer(options: BoardOptions = {}): Server {
    */
   const freshCompetencies = (): CompetencyIndex => loadCompetencies();
 
+  /**
+   * The signature facts, read off the disk per request (ADR 0017).
+   *
+   * Both signatures live in the Domains' own `meta.md`, and the board cannot see one from the
+   * catalogue alone: a Domain's co-signature is a FIELD, not a directory. Reading the disk keeps
+   * the page, the two doors and `npm run coverage` answering the same question the same way —
+   * the doors in particular run BEFORE the library is loaded, so they have nothing else to read.
+   *
+   * It costs a load per Domain. That is the price of the page agreeing with the files, and it is
+   * the same price the catalogue already pays once per request.
+   */
+  const freshSignatures = (): ReturnType<typeof signaturesOnDisk> => signaturesOnDisk(domainsDir);
+
   return createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://localhost");
 
@@ -379,11 +393,7 @@ export function createBoardServer(options: BoardOptions = {}): Server {
           domains: offered.domains,
           // The industry door (ADR 0012): grouped by category, each entry carrying
           // its computed status — open, planned, or closed — never a stored claim.
-          professions: professionOptions(
-            professions,
-            new Set(offered.domains.map((domain) => domain.id)),
-            competencies,
-          ),
+          professions: professionOptions(professions, freshSignatures(), competencies),
           styles: offered.styles,
           personas: offered.personas,
           models,
@@ -528,7 +538,7 @@ export function createBoardServer(options: BoardOptions = {}): Server {
         response.end();
         return;
       }
-      const closed = highRiskRefusal(professions, topic);
+      const closed = highRiskRefusal(professions, topic, freshSignatures());
       if (closed !== undefined) {
         send("failed", closed);
         response.end();
@@ -738,7 +748,7 @@ export function createBoardServer(options: BoardOptions = {}): Server {
         response.end();
         return;
       }
-      const closed = highRiskRefusal(professions, requestedTopic);
+      const closed = highRiskRefusal(professions, requestedTopic, freshSignatures());
       if (closed !== undefined) {
         send("failed", closed);
         response.end();

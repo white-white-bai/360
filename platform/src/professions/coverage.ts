@@ -1,6 +1,9 @@
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 
 import { DOMAINS_DIR } from "../catalog.ts";
+import { loadDomain } from "../experts/load.ts";
+import { hasTwoReviewers, type Domain } from "../experts/types.ts";
 import {
   competenciesOf,
   competencyStatus,
@@ -13,6 +16,7 @@ import {
   type Profession,
   type ProfessionIndex,
   type ProfessionStatus,
+  type Signatures,
 } from "./load.ts";
 
 /**
@@ -51,17 +55,45 @@ export interface CoverageEntry {
 }
 
 /**
+ * The signature facts, read off the disk (ADR 0017).
+ *
  * Every directory under `domains/` is signed — a draft lives in
  * `domains-draft/` and `review-domain` is the only thing that moves one across
- * (ADR 0010). So the directory listing IS the set of signatures, computed the
- * same way `professionStatus` gets it anywhere else.
+ * (ADR 0010) — so `signed` costs a directory listing. `coSigned` costs a load
+ * per Domain, because the second reviewer is a FIELD and only the loader can
+ * see it.
+ *
+ * A Domain that will not load counts as signed and NOT co-signed. That is the
+ * failing-closed direction on purpose: a high-risk line is precisely what an
+ * unreadable file must not be able to open, and a door that throws on a
+ * half-written asset refuses nothing at all. The validator reports why the file
+ * would not load; this function's job is to answer the door.
  */
-export function signedDomainIdsOnDisk(domainsDir: string = DOMAINS_DIR): Set<string> {
-  return new Set(
-    readdirSync(domainsDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name),
-  );
+export function signaturesOnDisk(domainsDir: string = DOMAINS_DIR): Signatures {
+  // A missing `domains/` is not an error to a caller that is only asking who signed
+  // something: no Domains, no signatures. It also fails closed at every door that
+  // takes this answer — an unreadable shelf opens nothing.
+  if (!existsSync(domainsDir)) return { signed: new Set(), coSigned: new Set() };
+
+  const signed = new Set<string>();
+  const coSigned = new Set<string>();
+  for (const entry of readdirSync(domainsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    signed.add(entry.name);
+    try {
+      if (hasTwoReviewers(loadDomain(join(domainsDir, entry.name)))) coSigned.add(entry.name);
+    } catch {
+      // Signed, single-reviewed. Not a silent failure — the validator names it.
+    }
+  }
+  return { signed, coSigned };
+}
+
+/** The co-signed ids among Domains a caller has already loaded — no second read. */
+export function coSignedDomainIds(domains: Iterable<Domain>): Set<string> {
+  const ids = new Set<string>();
+  for (const domain of domains) if (hasTwoReviewers(domain)) ids.add(domain.id);
+  return ids;
 }
 
 function coverageOf(
@@ -95,15 +127,17 @@ function coverageOf(
 export function capabilityMap(
   index: ProfessionIndex,
   competencies: CompetencyIndex,
-  signedDomainIds: ReadonlySet<string>,
+  signatures: Signatures,
   professionId: string,
 ): CoverageEntry | undefined {
   const profession = index.professions.get(professionId);
   if (profession === undefined) return undefined;
   return {
     profession,
-    status: professionStatus(profession, signedDomainIds),
-    ...coverageOf(competencies, signedDomainIds, professionId),
+    status: professionStatus(profession, signatures.signed, signatures.coSigned),
+    // Coverage is about whether a signed Domain TEACHES a unit, so the co-signed
+    // set plays no part here — a single signature is enough to teach.
+    ...coverageOf(competencies, signatures.signed, professionId),
   };
 }
 
@@ -111,11 +145,11 @@ export function capabilityMap(
 export function coverageLedger(
   index: ProfessionIndex,
   competencies: CompetencyIndex,
-  signedDomainIds: ReadonlySet<string>,
+  signatures: Signatures,
 ): CoverageEntry[] {
   return [...index.professions.values()].map((profession) => ({
     profession,
-    status: professionStatus(profession, signedDomainIds),
-    ...coverageOf(competencies, signedDomainIds, profession.id),
+    status: professionStatus(profession, signatures.signed, signatures.coSigned),
+    ...coverageOf(competencies, signatures.signed, profession.id),
   }));
 }

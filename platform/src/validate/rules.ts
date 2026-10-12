@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { COMPETENCIES_FILE, DOMAINS_DIR, PERSONAS_DIR, PROFESSIONS_FILE, STYLES_DIR } from "../catalog.ts";
-import type { Domain, Persona, Style } from "../experts/types.ts";
+import { type Domain, type Persona, type Style } from "../experts/types.ts";
 import { loadDomain, loadPersona, loadStyle } from "../experts/load.ts";
 import { findPassage } from "../grounding/corpus.ts";
 import {
@@ -15,18 +15,10 @@ import {
   type ProfessionIndex,
   type ProfessionStatus,
 } from "../professions/load.ts";
+import { coSignedDomainIds } from "../professions/coverage.ts";
+import { isPlaceholder } from "../util/placeholder.ts";
 import { isLocalSource, localFileName, normaliseProvidedText, unusableSourceReason } from "../build/fetch.ts";
 import type { Finding, Severity, ValidationReport } from "./types.ts";
-
-/**
- * Anything that looks like an unfilled field rather than a decision. Kept in one
- * place so a placeholder cannot be recognised in one rule and missed in another.
- */
-const PLACEHOLDER = /REPLACE|TODO|TBD|UNASSIGNED|CHANGEME|FIXME|XXX/i;
-
-function placeholder(value: string | undefined): boolean {
-  return value === undefined || value.trim() === "" || PLACEHOLDER.test(value);
-}
 
 function finding(
   severity: Severity,
@@ -81,6 +73,70 @@ function domainDirs(dir: string): string[] {
 // ---------------------------------------------------------------- corpus rules
 
 /**
+ * The second reviewer's pair, when there is one (ADR 0017).
+ *
+ * Three states are legitimate — no second reviewer at all (the single-reviewed
+ * Domains that predate the second signature), and a pair of two different,
+ * filled names — so this rule fires only on the shapes in between. Each of them
+ * is a Domain that reads as co-signed without being it, which is the one failure
+ * mode a second signature must not have: the whole point of recording it is that
+ * a reader can trust the file, and a half-written pair is exactly the thing that
+ * would let a high-risk line open on a signature nobody gave.
+ *
+ * It says nothing about whether the two names are two PEOPLE. Nothing in a file
+ * can, and a rule whose name promised it would be the first lie in an ADR built
+ * to avoid one (ADR 0017 decision 2) — the check is named for what it does.
+ */
+function validateSecondReview(domain: Domain): Finding[] {
+  const where = `domains/${domain.id}/meta.md`;
+  const second = domain.secondReviewedBy;
+  const secondOn = domain.secondReviewedOn;
+  const named = second !== undefined;
+  const dated = secondOn !== undefined;
+
+  // Neither field: the honest single-reviewed state. Nothing to say.
+  if (!named && !dated) return [];
+
+  if (named !== dated) {
+    return [
+      finding(
+        "error",
+        "corpus.second-review-invalid",
+        where,
+        `the second review is half-recorded: secondReviewedBy=${JSON.stringify(second)}, secondReviewedOn=${JSON.stringify(secondOn)} — a signature needs both a name and a date`,
+        "fill in the missing half, or remove both lines — a half-filled pair is not a signature",
+      ),
+    ];
+  }
+
+  if (isPlaceholder(second) || isPlaceholder(secondOn)) {
+    return [
+      finding(
+        "error",
+        "corpus.second-review-invalid",
+        where,
+        `the second review is not recorded: secondReviewedBy=${JSON.stringify(second)}, secondReviewedOn=${JSON.stringify(secondOn)}`,
+        "name the second person who read the corpus, and the date — or remove both lines and stay single-reviewed",
+      ),
+    ];
+  }
+
+  if (second === domain.corpusReviewedBy) {
+    return [
+      finding(
+        "error",
+        "corpus.second-review-invalid",
+        where,
+        `the second reviewer is the same person as the first (${JSON.stringify(second)}) — two signatures by one person are one signature`,
+        "name a different person, or remove both lines and stay single-reviewed",
+      ),
+    ];
+  }
+
+  return [];
+}
+
+/**
  * Provenance, checked at two strengths, plus the sign-off.
  *
  * Note what is NOT here: a rule for "this passage has no source at all". The
@@ -105,7 +161,7 @@ function validateCorpus(domain: Domain, dir: string): Finding[] {
   // the Domain, which surfaces as `asset.unloadable`. What this rule adds is the
   // case the loader cannot see — a key that is present and unfilled, such as
   // `corpusReviewedBy: TODO`. Same division of labour as provenance above.
-  if (placeholder(domain.corpusReviewedBy) || placeholder(domain.corpusReviewedOn)) {
+  if (isPlaceholder(domain.corpusReviewedBy) || isPlaceholder(domain.corpusReviewedOn)) {
     findings.push(
       finding(
         "error",
@@ -117,9 +173,18 @@ function validateCorpus(domain: Domain, dir: string): Finding[] {
     );
   }
 
+  // The SECOND signature (ADR 0017). A Domain with no second reviewer at all is
+  // the honest single-reviewed state, so this rule says nothing about it — the
+  // rule that needs two reviewers lives on the Profession, because it is a
+  // HIGH-RISK line that needs them, not every Domain. What this catches is a
+  // pair that LOOKS like a second signature and is not one, because a file that
+  // appears co-signed while nobody signed it is worse than one that plainly is
+  // not.
+  findings.push(...validateSecondReview(domain));
+
   for (const passage of domain.corpus.passages) {
     const where = `domains/${domain.id}/corpus.md#${passage.id}`;
-    if (placeholder(passage.source)) {
+    if (isPlaceholder(passage.source)) {
       findings.push(
         finding(
           "error",
@@ -340,7 +405,7 @@ function validateGlossary(domain: Domain): Finding[] {
         finding("warning", "glossary.term-unused", where, `term ${JSON.stringify(term)} never appears in the corpus`),
       );
     }
-    if (placeholder(rendering)) {
+    if (isPlaceholder(rendering)) {
       findings.push(
         finding("error", "glossary.rendering-missing", where, `term ${JSON.stringify(term)} has no rendering`),
       );
@@ -479,7 +544,7 @@ function validateDomain(
 
   // ADR 0006: configuration rights and accountability are the same thing. An
   // unowned Domain rots silently, so "nobody in particular" is not an owner.
-  if (placeholder(domain.owner)) {
+  if (isPlaceholder(domain.owner)) {
     findings.push(
       finding(
         "error",
@@ -568,18 +633,23 @@ function validateDomainOverlap(
 }
 
 /**
- * The industry catalogue's own rules (ADR 0012).
+ * The industry catalogue's own rules (ADR 0012, re-cut by ADR 0017).
  *
- * Two of them carry the platform's promises. `profession.high-risk-open`
- * extends ADR 0004 — no actor verifies its own output — to signing itself:
- * a high-risk Profession may not list Domains while every Domain records a
- * single reviewer, so the door stays closed until two-reviewer signing exists.
- * And `profession.unknown-domain` keeps the entry honest: a Profession may
+ * `profession.high-risk-open` extends ADR 0004 — no actor verifies its own
+ * output — to signing itself: a high-risk line may not be taught off a single
+ * reviewer's word. ADR 0017 is what turned that from a rule about a missing
+ * capability into a rule about a missing signature: the Domain CAN record a
+ * second reviewer now, so this fires exactly when one it lists does not carry
+ * one. `profession.reviewers-insufficient` is the same promise one level up:
+ * the Owner's allocation of who may review a line is written in the asset, and
+ * a high-risk line that lists Domains must name two different people to review
+ * them. And `profession.unknown-domain` keeps the entry honest: a Profession may
  * only claim Domains that are actually signed.
  */
 function validateProfessions(
   index: ProfessionIndex,
   domainIds: ReadonlySet<string>,
+  coSignedDomainIds: ReadonlySet<string>,
 ): Finding[] {
   const findings: Finding[] = [];
 
@@ -620,16 +690,42 @@ function validateProfessions(
         );
       }
     }
+
     if (profession.risk === "high" && profession.domainIds.length > 0) {
-      findings.push(
-        finding(
-          "error",
-          "profession.high-risk-open",
-          where,
-          "a high-risk Profession lists Domains, but no Domain can yet record the two independent reviewers ADR 0012 requires",
-          "empty its `domains` list until two-reviewer signing exists — the door stays closed",
-        ),
+      // The rule reads the STATUS, so the validator and the door cannot disagree
+      // about which lines are open: `closed` here means exactly what it means to
+      // `highRiskRefusal` — a high-risk line with no two-reviewer backing.
+      if (professionStatus(profession, domainIds, coSignedDomainIds) === "closed") {
+        const unbacked = profession.domainIds.filter((id) => !coSignedDomainIds.has(id));
+        findings.push(
+          finding(
+            "error",
+            "profession.high-risk-open",
+            where,
+            `this is a high-risk line and ${unbacked.length} of its listed Domains (${unbacked.join(", ")}) do not carry two reviewers`,
+            "counter-sign each with a second, different name (`npm run counter-sign -- <domain-id>`), or empty the `domains` list",
+          ),
+        );
+      }
+
+      // Who may review this line is the Owner's allocation, written down rather
+      // than remembered (ADR 0017 decision 6). A high-risk line that lists
+      // Domains and names fewer than two distinct people is a line nobody has
+      // arranged to have read twice.
+      const roster = new Set(
+        profession.reviewers.map((name) => name.trim()).filter((name) => name !== "" && !isPlaceholder(name)),
       );
+      if (roster.size < 2) {
+        findings.push(
+          finding(
+            "error",
+            "profession.reviewers-insufficient",
+            where,
+            `a high-risk Profession that lists Domains must name two different people to review it; \`reviewers\` names ${roster.size}`,
+            "add a second reviewer to its `reviewers` roster — two names, not one name twice",
+          ),
+        );
+      }
     }
   }
 
@@ -711,6 +807,7 @@ function validateCompetencies(
   index: CompetencyIndex,
   professions: ProfessionIndex,
   signedDomainIds: ReadonlySet<string>,
+  coSignedDomainIds: ReadonlySet<string>,
 ): Finding[] {
   const findings: Finding[] = [];
   const units = [...index.competencies.values()];
@@ -801,7 +898,7 @@ function validateCompetencies(
     const own = units.filter((unit) => unit.professionId === profession.id);
 
     if (own.length === 0) {
-      if (professionStatus(profession, signedDomainIds) === "open") {
+      if (professionStatus(profession, signedDomainIds, coSignedDomainIds) === "open") {
         findings.push(
           finding(
             "warning",
@@ -836,7 +933,7 @@ function validateCompetencies(
 function validateAxis<T extends Persona | Style>(kind: string, item: T, path: string): Finding[] {
   const findings: Finding[] = [];
   for (const [field, value] of Object.entries(item)) {
-    if (typeof value === "string" && placeholder(value)) {
+    if (typeof value === "string" && isPlaceholder(value)) {
       findings.push(
         finding(
           "warning",
@@ -935,6 +1032,13 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
     loadedDomains.push({ domain: loaded.value, dir, urls: domainSourceUrls(loaded.value, dir) });
   }
 
+  // The co-signed ids, read off the Domains that actually loaded. A Domain that
+  // will not load is counted as signed (its directory exists) and NOT co-signed
+  // — the failing-closed reading `signaturesOnDisk` takes, so the validator and
+  // both doors agree about which lines are open. The read is shared rather than
+  // re-derived: one predicate, `hasTwoReviewers`, is the whole of "co-signed".
+  const coSigned = coSignedDomainIds(loadedDomains.map(({ domain }) => domain));
+
   const professions = safely(professionsFile, () => loadProfessions(professionsFile));
   if (professions.value === undefined && professions.problem !== undefined) {
     findings.push(professions.problem);
@@ -954,7 +1058,7 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
   }
 
   if (professions.value !== undefined) {
-    findings.push(...validateProfessions(professions.value, domainIds));
+    findings.push(...validateProfessions(professions.value, domainIds, coSigned));
   }
 
   // The Competency rules need both halves of the middle layer's contract: the
@@ -967,7 +1071,7 @@ export function validateRepo(options: ValidateOptions = {}): ValidationReport {
     findings.push(competencies.problem);
   }
   if (competencies.value !== undefined && professions.value !== undefined) {
-    findings.push(...validateCompetencies(competencies.value, professions.value, domainIds));
+    findings.push(...validateCompetencies(competencies.value, professions.value, domainIds, coSigned));
   }
 
   findings.push(...validateDomainOverlap(loadedDomains));

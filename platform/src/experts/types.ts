@@ -14,6 +14,7 @@
 
 import type { Corpus } from "../grounding/corpus.ts";
 import type { UnderstandingCheck } from "../checks/types.ts";
+import { isPlaceholder } from "../util/placeholder.ts";
 
 export interface Persona {
   id: string;
@@ -70,6 +71,25 @@ export interface Domain {
    */
   corpusReviewedBy: string;
   corpusReviewedOn: string;
+  /**
+   * The SECOND reviewer, and the only field pair that can open a high-risk
+   * Profession (ADR 0017).
+   *
+   * Optional on load, deliberately: the Domains that existed before the second
+   * signature did are single-reviewed, which is what they always were, and
+   * requiring these fields would have made every one of them unloadable rather
+   * than honestly under-backed. A pair that is half-filled, or that repeats the
+   * first name, is refused — by `hasTwoReviewers` below for the status
+   * computation, and by the validator (`corpus.second-review-invalid`) which
+   * says so out loud.
+   *
+   * What this CANNOT record is independence. Two names in a file are two names;
+   * that they are two people is an attestation by the Owner, not a fact the
+   * platform can read (ADR 0017 decision 2). The rule is named for what it
+   * checks, not for what it hopes.
+   */
+  secondReviewedBy?: string;
+  secondReviewedOn?: string;
   /** Language the teaching is delivered in; the corpus stays in its source language. */
   deliveryLanguage: string;
   sources: string[];
@@ -89,6 +109,27 @@ export interface Expert {
   persona: Persona;
   style: Style;
   domain: Domain;
+}
+
+/**
+ * Whether a Domain carries a second reviewer — the ONE predicate that decides
+ * co-signing (ADR 0017).
+ *
+ * The loader, the validator, the status computation, the coverage report and
+ * both doors all read this function rather than deriving the fact again, because
+ * four derivations of "is this co-signed" is four chances for the page and the
+ * validator to disagree about which lines are open.
+ *
+ * It answers a narrow question on purpose. `true` means two different names are
+ * recorded here and neither is scaffold text. It does NOT mean two people read
+ * the corpus — nothing in a file can mean that, and a predicate whose name
+ * promised it would be the first lie in an ADR built to avoid one.
+ */
+export function hasTwoReviewers(domain: Domain): boolean {
+  const first = domain.corpusReviewedBy;
+  const second = domain.secondReviewedBy;
+  if (isPlaceholder(second) || isPlaceholder(domain.secondReviewedOn)) return false;
+  return second !== first;
 }
 
 export function describeExpert(expert: Expert): string {

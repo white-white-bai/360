@@ -20,6 +20,7 @@
     "classroom": "node src/session/run-classroom.ts",
     "build-domain": "node src/build/build-domain.ts",
     "review-domain": "node src/build/review-domain.ts",
+    "counter-sign": "node src/build/counter-sign.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --test"
   },

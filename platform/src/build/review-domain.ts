@@ -4,11 +4,12 @@ import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 
 import { DOMAINS_DIR, DOMAIN_DRAFTS_DIR } from "../catalog.ts";
-import type { Domain } from "../experts/types.ts";
+import { hasTwoReviewers, type Domain } from "../experts/types.ts";
 import { loadDomain } from "../experts/load.ts";
 import { validateDraft } from "../validate/rules.ts";
 import type { Finding } from "../validate/types.ts";
 import { parseFrontmatter } from "../util/frontmatter.ts";
+import { isPlaceholder } from "../util/placeholder.ts";
 import { isLocalSource, localFileName } from "./fetch.ts";
 import { PENDING_CODES } from "./write-domain.ts";
 
@@ -18,6 +19,10 @@ import { PENDING_CODES } from "./write-domain.ts";
  * A draft becomes a Domain in exactly one way: a person looks at what it will teach, and puts
  * their name on it. This module is that one way — the builder cannot sign, the validator cannot
  * sign, and nothing moves across the directory line without a name.
+ *
+ * ADR 0017 added a SECOND signature, in `counterSignDomain` below. It is the same act on an
+ * already-signed Domain, and it is the only thing that can open a high-risk Profession — which
+ * is why it lives here, behind the same not-a-repair rule, and not behind the MCP server.
  */
 
 export interface ReviewPaths {
@@ -219,6 +224,81 @@ export function signDraft(id: string, options: SignOptions): string {
   mkdirSync(domainsDir, { recursive: true });
   renameSync(dir, target);
   return target;
+}
+
+// ---------------------------------------------------------------- second signature --
+
+export interface CounterSignOptions {
+  name: string;
+  /** ISO date; the caller may fix it for a test. Defaults to today. */
+  date?: string;
+  domainsDir?: string;
+}
+
+/**
+ * Write the second signature under the first one, inserting both lines.
+ *
+ * The builder writes neither line, so the usual path is an insert; the refusal below is for the
+ * case where one is already there. Overwriting a signature is not this command's job — a person
+ * who means to replace a name edits the file, and a command that quietly did it for them would
+ * be a door that erases an attestation.
+ */
+function withSecondReview(markdown: string, signer: string, date: string): string {
+  if (/^secondReviewedBy:.*$/m.test(markdown)) {
+    throw new Error(
+      "meta.md already carries a `secondReviewedBy:` line — this command never overwrites a signature; edit the file if you mean to replace it",
+    );
+  }
+  const anchor = /^corpusReviewedOn:.*$/m;
+  if (!anchor.test(markdown)) {
+    throw new Error("meta.md has no `corpusReviewedOn` line to put the second signature under");
+  }
+  return markdown.replace(anchor, (line: string) => `${line}\nsecondReviewedBy: ${signer}\nsecondReviewedOn: ${date}`);
+}
+
+/**
+ * Add the second, independent signature to an already-signed Domain (ADR 0017).
+ *
+ * This is the only thing that can open a high-risk Profession, so it carries the same
+ * not-a-repair rule as the first signature: a Domain that no longer passes the validator gets a
+ * refusal, not a name. It moves no files — the Domain is already in the library — and it refuses
+ * to be the same person as the first reviewer, because two signatures by one person are one
+ * signature.
+ *
+ * Independence is an ATTESTATION, not a proof: nothing here can check that two names are two
+ * people who read the corpus apart from each other. What it can do is refuse the shapes that are
+ * plainly one reviewer: an absent name, a placeholder, or the same name twice.
+ */
+export function counterSignDomain(id: string, options: CounterSignOptions): string {
+  const domainsDir = options.domainsDir ?? DOMAINS_DIR;
+  const dir = join(domainsDir, id);
+  if (!existsSync(dir)) throw new Error(`no Domain \`${id}\` to counter-sign (looked in ${dir})`);
+
+  const name = options.name.trim();
+  if (name === "" || isPlaceholder(name)) {
+    throw new Error("a signature needs a name — a placeholder is not a reviewer, and an unowned review is not a review");
+  }
+
+  const broken = validateDraft(dir).findings.filter((finding) => finding.severity === "error");
+  if (broken.length > 0) {
+    throw new Error(
+      `the Domain does not pass the validator, so there is nothing to counter-sign (${broken.length} error(s)):\n` +
+        broken.map((finding) => `  ${finding.code}: ${finding.message}`).join("\n"),
+    );
+  }
+
+  const domain = loadDomain(dir);
+  if (hasTwoReviewers(domain)) {
+    throw new Error(`\`${id}\` already carries a second reviewer (${domain.secondReviewedBy}) — remove that line first if it is wrong`);
+  }
+  if (name === domain.corpusReviewedBy) {
+    throw new Error(`\`${id}\` is signed by ${JSON.stringify(domain.corpusReviewedBy)}; a second signature must come from a different person`);
+  }
+
+  const date = options.date ?? new Date().toISOString().slice(0, 10);
+  const metaPath = join(dir, "meta.md");
+  writeFileSync(metaPath, withSecondReview(readFileSync(metaPath, "utf8"), name, date), "utf8");
+  return dir;
 }
 
 // ------------------------------------------------------------------------ CLI --

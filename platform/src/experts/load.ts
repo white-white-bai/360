@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import {
   optionalList,
+  optionalString,
   parseFrontmatter,
   requireList,
   requireOneOf,
@@ -87,6 +88,12 @@ export function loadDomain(dir: string): Domain {
     owner: requireString(data, "owner", where),
     corpusReviewedBy: requireString(data, "corpusReviewedBy", where),
     corpusReviewedOn: requireString(data, "corpusReviewedOn", where),
+    // The second signature is OPTIONAL (ADR 0017): the Domains that predate it
+    // are single-reviewed, which is what they always were, and refusing them at
+    // load would have made the honest state the unloadable one. `hasTwoReviewers`
+    // decides what the pair means; the loader only carries it.
+    secondReviewedBy: optionalString(data, "secondReviewedBy"),
+    secondReviewedOn: optionalString(data, "secondReviewedOn"),
     deliveryLanguage: requireString(data, "deliveryLanguage", where),
     sources: requireList(data, "sources", where),
     corpus: parseCorpus(read(join(dir, "corpus.md")), id),

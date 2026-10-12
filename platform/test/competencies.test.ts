@@ -354,7 +354,9 @@ test("the ledger's map splits both halves, and never prints 「无」 as a gap",
   });
   const professions = loadProfessions(tree.professionsFile);
   const competencies = loadCompetencies(tree.competenciesFile);
-  const entry = capabilityMap(professions, competencies, new Set([SIGNED]), "test-profession");
+  // One signature, no co-signature: coverage is about whether a signed Domain TEACHES
+  // a unit, and a single signature is enough for that (ADR 0017 decision 3).
+  const entry = capabilityMap(professions, competencies, { signed: new Set([SIGNED]), coSigned: new Set() }, "test-profession");
 
   assert.ok(entry);
   assert.equal(entry.status, "open");

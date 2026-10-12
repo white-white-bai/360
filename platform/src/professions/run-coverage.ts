@@ -1,6 +1,6 @@
 import {
   coverageLedger,
-  signedDomainIdsOnDisk,
+  signaturesOnDisk,
   type CoverageEntry,
 } from "./coverage.ts";
 import { loadCompetencies, loadProfessions, type ProfessionStatus } from "./load.ts";
@@ -68,7 +68,7 @@ function printEntry(entry: CoverageEntry): void {
 
 function main(): void {
   const wanted = process.argv.slice(2).filter((arg) => !arg.startsWith("-"));
-  const signed = signedDomainIdsOnDisk();
+  const signatures = signaturesOnDisk();
   const index = loadProfessions();
   const competencies = loadCompetencies();
 
@@ -76,7 +76,7 @@ function main(): void {
   console.log("Computed from the same assets the entry panel draws from — the page and");
   console.log("this report cannot disagree. A report, not a gate: it always exits zero.");
 
-  const ledger = coverageLedger(index, competencies, signed);
+  const ledger = coverageLedger(index, competencies, signatures);
   const shown = wanted.length === 0 ? ledger : ledger.filter((e) => wanted.includes(e.profession.id));
 
   if (shown.length === 0) {
