@@ -6,7 +6,7 @@ The Catalogue holds seven Domains, all software topics. The expansion goal is三
 
 ## The decisions
 
-**1. Three layers, one of them deferred.** *Profession* → *Competency* → *Domain*. A Profession is the entry unit the learner picks; a Domain still teaches one boundaried slice. The middle layer — Competency, the must-know-and-be-able-to-apply units linked by prerequisites — is recorded here but NOT implemented: it is needed only once a Profession holds more than one Domain, and inventing it now would be machinery without a consumer.
+**1. Three layers, one of them deferred.** *Profession* → *Competency* → *Domain*. A Profession is the entry unit the learner picks; a Domain still teaches one boundaried slice. The middle layer — Competency, the must-know-and-be-able-to-apply units linked by prerequisites — is recorded here but NOT implemented: it is needed only once a Profession holds more than one Domain, and inventing it now would be machinery without a consumer. **Superseded by ADR 0015**: the condition is met — `software-developer` holds seven signed Domains with no orchestration between them — so the layer is landed and the deferral is spent. The rest of this decision (the three layers themselves) stands.
 
 **2. The skeleton is the official classification.** 《中华人民共和国职业分类大典》(2022年版: 8 大类, 1639 职业) supplies the category structure, because it is public, stable and citable. 三百六十行 names enter as *aliases*, not as taxonomy. Only the professions the platform can actually say something about are seeded — the file's length is again the honest statement of what can be taught, so a skeleton of categories with a pilot batch of professions, not a copy of all 1639.
 
@@ -27,5 +27,5 @@ The Catalogue holds seven Domains, all software topics. The expansion goal is三
 - `professions/professions.md` holds categories and Professions in the existing section grammar; `loadProfessions` parses it, `professionOptions` computes status from signed Domains, `/options` carries it to the page, and the entry panel shows it grouped by category with each Profession's status visible.
 - A learner clicking an open Profession starts its first Domain; a planned one types the profession into the topic box (the builder's door); a closed one is inert and says why.
 - The validator gains profession rules: unknown category, unknown or unsigned Domain, missing boundary, invalid tier/risk, and high-risk-open. A Domain listed by no Profession warns (`domain.unlisted`) — coverage that the directory cannot show is coverage that quietly decays.
-- Tier C Profains carry their boundary in the data, so the "we only teach the thinking, not the hands" claim is checkable rather than remembered.
+- Tier C Professions carry their boundary in the data, so the "we only teach the thinking, not the hands" claim is checkable rather than remembered.
 - The acceptance experiment is untouched: it runs on Domains, and a Profession is a door to Domains, not a Domain itself.
