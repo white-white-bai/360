@@ -42,7 +42,8 @@ npm run counter-sign -- <id>              # 第二位审核人独立签字（ADR
 npm run probe                             # provider 自检：端点/模型/key 长度，各一次最小调用
 npm run validate                          # 校验全部教材资产
 npm run coverage                          # 缺口表：每个职业能学什么、还缺什么、不在这里教什么（ADR 0015/0018）
-npm test                                  # 320 个测试（node --test，无框架）
+npm run experiment                        # 消融对比报告（ADR 0001）：真人 / 模拟两栏并列，从不合并（ADR 0019）
+npm test                                  # 337 个测试（node --test，无框架）
 ```
 
 agent 服务（`cd agent`；一次性 `python -m venv .venv && .venv\Scripts\pip install -e ".[dev]"`）：
@@ -96,7 +97,8 @@ export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；�
 | `domains/` | 已签字的教材；现场造的还带 `sources.json`（抓取的原文在 `sources/`，不入库，出处引用在语料正文里） |
 | `domains-draft/` | 未签字的草稿（gitignored） |
 | `library/` · `professions/` | 全站共用的 Persona 与 Style；行业目录（ADR 0012）与**能力单元**（ADR 0015） |
-| `platform/.sessions/` | 学习者的课堂记录（gitignored；agent 的 memory **只读**它） |
+| `platform/.sessions/` | 学习者的课堂记录（gitignored、敏感；agent 的 memory **只读**它） |
+| `platform/.experiments/` | 实验试次：真人上课的答案、误解与自评（gitignored、敏感，ADR 0019） |
 | `agent/.state/` | agent 的会话检查点（gitignored） |
 | `docs/adr/` | 决策记录，0001–0021——代码之前的每个决定都在这里 |
 | `CONTEXT.md` | 术语表：代码与文档必须使用其中的词 |
@@ -125,6 +127,12 @@ export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；�
 - 0017 — Domain 可以带**第二位审核人**；高风险职业要开锁，钥匙是两名互不相同的具名审核人。
 - 0018 — 签字有**保质期**（按 Tier 与 Risk 两个刻度取更短的一个）；过期是一条**警告**，不是错误，不改变状态、不关任何门。
 
+**此后又落地三条**（ADR 0019–0021）——一条把验收实验的真人接口接上，两条是加固：
+
+- 0019 — **接真人的那一半**：`npm run enter -- --baseline` / `--apparatus` 由真人上课，试次按 fixture 的三个资产固定后落盘；`npm run experiment` 分**真人 / 模拟**两个面板并列报告，从不合并。**代码在，人还没到**（见下「未落地」）。
+- 0020 — 实验的落盘里，一个读不了的文件被**点名跳过**，不再带崩整份报告；崩溃的写只留 `.tmp` 碎片，不落半条记录。
+- 0021 — 语料的第二入口里，由人提供的文本能用 `local:<文件>` 自称并**同等可引**，不再每句话误报「来源含糊」。
+
 **已落地不等于已填写**（这一条比上面那五条更重要）：
 
 - 能力单元只有软件开发人员写下了 **5** 个（`npm run coverage` 现报 covered 4、planned 1）；其余九个职业的地图是空的，而空的那一半是**显示出来的**，不是省略的。
@@ -133,7 +141,7 @@ export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；�
 
 **未落地**：
 
-- ADR 0001 的验收实验**还没有数字**——"有没有教得更好"仍然无人可答；`agent/evals/` 是它的种子指标。**接真人的那一半已经接上了**（ADR 0019）：`npm run enter -- --baseline` / `--apparatus` 由真人上课，试次按 fixture 的三个资产固定后落盘，`npm run experiment` 分两个面板并列报告（真人 / 模拟，从不合并）。**但没有一个人上过课**，所以 REAL LEARNERS 面板现在打印的是一句诚实的空话。剩下的不是代码，是花时间和真钱去坐几节课。
+- ADR 0001 的验收实验**还没有数字**——"有没有教得更好"仍然无人可答；`agent/evals/` 是它的种子指标。工具都在了（ADR 0019，见上），**但没有一个人上过课**，所以 REAL LEARNERS 面板现在打印的是一句诚实的空话。剩下的不是代码，是花时间和真钱去坐几节课。
 - 距离"三百六十行"还很远，好在这个距离是**说得出口的**：官方骨架 1639 个职业，目录里 10 个，其中 1 个可学。`npm run coverage` 就是逐行念这句话的工具——它只回答"还缺什么"，补哪一行是人的决定（ADR 0006/0015）。
 - 明确未落地：FineTuning 与多模态视觉（本机 GPU 是 GT 710，且无必要）；内容安全只有预留位置；K8s 清单与 vLLM 文档未在任何地方验证过；**实操评估**（模拟器、线下认证、跟师记录）不在架构内，平台的主张止于认知层。
 - 直接课堂是明确接受的取舍：快、任意主题，代价是不设防的边界；它永远不计分、不签字、不声明接地（ADR 0011）。
