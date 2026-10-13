@@ -1,7 +1,6 @@
 import { createInterface } from "node:readline/promises";
 
 import { parseAssertionList } from "../assertions/parse.ts";
-import { findCheck } from "../checks/load.ts";
 import type { UnderstandingCheck } from "../checks/types.ts";
 import { EXPERIMENT_CHECKS, EXPERIMENT_DOMAIN, EXPERIMENT_LIST } from "../experiment/fixtures-experiment.ts";
 import type { Condition } from "../experiment/harness.ts";
@@ -117,6 +116,22 @@ async function askSelfAssessment(): Promise<number | null> {
   }
 }
 
+/**
+ * A fixture pins its assets by id (ADR 0019), so a Domain that has drifted away from the
+ * fixture can leave one missing. That is a drift between the fixture and the corpus, not
+ * something the person did, and it must not arrive as a stack trace from `findCheck` — which
+ * names the ids that DO exist and says nothing about what to do about it.
+ *
+ * Name the missing id and set the exit code; the caller decides whether the sitting can go on.
+ * A measurement taken against a different asset is a number that answers a different question,
+ * which is the whole thing pinning exists to prevent.
+ */
+function reportPinnedAssetMissing(domainId: string, role: string, id: string): void {
+  console.error(`\n实验的${role}固定在 \`${id}\` 上，但 ${domainId} 里已经没有这个 check 了——fixture 和语料对不上了。`);
+  console.error("把资产补回语料，或者把 fixture 里的 id 改成语料里那个名字，再来。");
+  process.exitCode = 1;
+}
+
 async function lesson(expert: Expert, provider: ModelProvider, sitting: Sitting | null): Promise<void> {
   const terminalChecks = expert.domain.checks.filter((candidate) => !candidate.id.startsWith("T-"));
   // In experiment mode the three assets are PINNED BY ID (ADR 0019), so a person is asked
@@ -127,15 +142,27 @@ async function lesson(expert: Expert, provider: ModelProvider, sitting: Sitting 
     sitting === null
       ? { check: terminalChecks[0], retakeCheck: terminalChecks[1], disable: undefined, list: undefined }
       : {
-          check: findCheck(expert.domain.checks, EXPERIMENT_CHECKS.terminal),
-          retakeCheck: findCheck(expert.domain.checks, EXPERIMENT_CHECKS.retake),
+          check: expert.domain.checks.find((candidate) => candidate.id === EXPERIMENT_CHECKS.terminal),
+          retakeCheck: expert.domain.checks.find((candidate) => candidate.id === EXPERIMENT_CHECKS.retake),
           disable: CONDITION_ABLATIONS[sitting.condition],
           list: parseAssertionList(EXPERIMENT_LIST, EXPERIMENT_DOMAIN),
         };
   const { check } = plan;
   if (check === undefined) {
+    if (sitting !== null) {
+      reportPinnedAssetMissing(expert.domain.id, "首问", EXPERIMENT_CHECKS.terminal);
+      return;
+    }
     console.error(`\n${expert.domain.id} has no terminal check, so there is nothing to teach.`);
     process.exitCode = 1;
+    return;
+  }
+  if (sitting !== null && plan.retakeCheck === undefined) {
+    // Refused rather than taught without it: the apparatus falls back to the SAME check when no
+    // retake asset is supplied (apparatus.ts), so a learner who failed would be re-asked the
+    // question they just failed — the recall-not-understanding measurement the retake exists to
+    // replace. A trial that cannot be run as the fixture wrote it is not run.
+    reportPinnedAssetMissing(expert.domain.id, "第二问", EXPERIMENT_CHECKS.retake);
     return;
   }
 
@@ -268,7 +295,14 @@ async function followUp(id: string): Promise<void> {
   const retentionAsset =
     recorded === null
       ? domain.checks.find((candidate) => !candidate.id.startsWith("T-"))
-      : findCheck(domain.checks, EXPERIMENT_CHECKS.terminal);
+      : domain.checks.find((candidate) => candidate.id === EXPERIMENT_CHECKS.terminal);
+  if (recorded !== null && retentionAsset === undefined) {
+    // Reported, not fatal: the transfer measurement below is a separate sitting and may still be
+    // takeable. But the retention row is left MISSING rather than filled in from another asset —
+    // the trial was recorded against this one, and a number from a different question would read
+    // as retention of the lesson that was actually taught.
+    reportPinnedAssetMissing(domain.id, "保留问", EXPERIMENT_CHECKS.terminal);
+  }
   if (retentionAsset !== undefined) {
     const answer = await put(retentionAsset.prompt, "你答", false);
     const measured = measureFollowUp(current, retentionAsset, "retention", answer);
@@ -280,7 +314,10 @@ async function followUp(id: string): Promise<void> {
   const transferAsset =
     recorded === null
       ? domain.checks.find((candidate) => candidate.id.startsWith("T-"))
-      : findCheck(domain.checks, EXPERIMENT_CHECKS.transfer);
+      : domain.checks.find((candidate) => candidate.id === EXPERIMENT_CHECKS.transfer);
+  if (recorded !== null && transferAsset === undefined) {
+    reportPinnedAssetMissing(domain.id, "迁移问", EXPERIMENT_CHECKS.transfer);
+  }
   if (transferAsset !== undefined) {
     const answer = await put(transferAsset.prompt, "你答", true);
     if (answer !== "") {
