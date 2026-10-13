@@ -64,6 +64,20 @@ _Avoid_: Tutor, teacher, presenter, main agent
 The position summoned at a specific point to surface a wrong intuition and refute it. It is not a second explainer and does not carry the lesson.
 _Avoid_: Devil's advocate, critic, second expert, panel member, co-host
 
+### Measurement
+
+**Trial**:
+One sitting of the acceptance experiment, taken under a single named condition — `baseline` (one strong explainer and the terminal check, nothing else) or `apparatus` (the full teaching apparatus) — from which one result is read. A trial is not a lesson: the platform teaching somebody and somebody running the experiment are different acts, so a plain lesson leaves no trial, and recording is opt-in by the condition flag (ADR 0019).
+_Avoid_: Run, attempt, sample, test case, lesson
+
+**Trial Source**:
+Whether the learner who sat a trial was a person or a script. This is the field the report refuses to pool over: a script was written to contain the difference it shows and a person was not, so each source gets its own verdict and the two are never averaged into one.
+_Avoid_: Learner type, participant, subject, mode
+
+**Recorded Trial**:
+A trial written to disk, keyed by the session id it came from and carrying the learner's label and the date it was taken — the two facts a row needs in order to name itself. It lives in `platform/.experiments/` under a session record's rule (sensitive, gitignored), and a later follow-up sitting completes it with retention and transfer, measured over real elapsed time.
+_Avoid_: Experiment log, result file, row, entry
+
 ### Expert configuration
 
 **Expert**:
