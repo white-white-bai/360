@@ -98,7 +98,7 @@ export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；�
 | `library/` · `professions/` | 全站共用的 Persona 与 Style；行业目录（ADR 0012）与**能力单元**（ADR 0015） |
 | `platform/.sessions/` | 学习者的课堂记录（gitignored；agent 的 memory **只读**它） |
 | `agent/.state/` | agent 的会话检查点（gitignored） |
-| `docs/adr/` | 决策记录，0001–0018——代码之前的每个决定都在这里 |
+| `docs/adr/` | 决策记录，0001–0021——代码之前的每个决定都在这里 |
 | `CONTEXT.md` | 术语表：代码与文档必须使用其中的词 |
 | `.commandcode/skills/` | 本仓库自己的工程 skill 资产，和教学平台不是一回事 |
 
@@ -115,7 +115,7 @@ export ATP_ZDR=1              # 可选：零数据保留。只走 ZDR 上游；�
 **已有的两套栈**：
 
 - ADR 0013 的分期全部落地：Stage 0 骨架 → 1 RAG（golden hits@K **5/5**）→ 2 Agent 图（有界 ReAct + 独立校验 + 质疑者）→ 3 MCP + 评测（可回答题 **3/3**、首考通过 **1/3**、不可回答题老实说"语料查不到"）→ 4 交付（compose 整套真机验证）。
-- 测试：教材平台 **333**、agent **75**，全绿。
+- 测试：教材平台 **337**、agent **75**，全绿。
 
 **「三百六十行」这条线，已落地的五项**（ADR 0014–0018）：
 

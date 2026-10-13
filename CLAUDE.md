@@ -98,7 +98,7 @@ Gotchas recorded in the READMEs, worth not rediscovering: **Claude models answer
 - `professions/professions.md` — the industry catalogue (ADR 0012); a Profession's status is computed from signatures, never stored
 - `professions/competencies.md` — the Competency layer (ADR 0015): the Capability Map's units, their prerequisites, and what each does *not* teach; status is computed the same way a Profession's is
 - `platform/.sessions/` — learner records (gitignored, SENSITIVE); the agent reads them read-only
-- `docs/adr/` — decisions 0001–0018; `CONTEXT.md` — the glossary the code's and docs' vocabulary must follow
+- `docs/adr/` — decisions 0001–0021; `CONTEXT.md` — the glossary the code's and docs' vocabulary must follow
 - `.commandcode/skills/` — this repo's engineering skills. ADR 0001 settled that this is an **asset library for expert roles, not part of the delivery vehicle**; the platform never imports from it. `.commandcode/taste/` — local working preferences (gitignored) — read before doing work, don't duplicate them into docs.
 
 ## House rules
