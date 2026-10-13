@@ -49,3 +49,14 @@ export const DOMAIN_DRAFTS_DIR = join(REPO_ROOT, "domains-draft");
  * store can prove a deletion rather than merely attempt one.
  */
 export const SESSIONS_DIR = join(REPO_ROOT, "platform", ".sessions");
+
+/**
+ * Trials by real learners (ADR 0019).
+ *
+ * Sensitive for exactly the reason a session is (ADR 0002), and it holds MORE than a
+ * session does: a trial carries the learner's answers, their misconceptions, what they
+ * said they thought they understood, and the label they were filed under. So it is
+ * gitignored like `.sessions/`, it is keyed by the session id so the follow-up sitting can
+ * find and complete it, and it is never a place the platform reads from when teaching.
+ */
+export const EXPERIMENTS_DIR = join(REPO_ROOT, "platform", ".experiments");

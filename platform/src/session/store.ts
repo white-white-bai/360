@@ -21,6 +21,27 @@ export interface SessionStore {
 }
 
 /**
+ * Where one record with this id lives under this directory.
+ *
+ * Ids reach the filesystem, so they are a boundary. `/` and `\` are refused
+ * outright; a bare `.` or `..` is refused too, not because the `.json` suffix
+ * makes traversal work, but because nothing legitimate needs an id that looks
+ * like a directory hop.
+ *
+ * A function rather than a method (ADR 0019): the experiment record store is
+ * keyed by the SAME session id, and a second copy of a security check is a second
+ * place for it to be wrong.
+ */
+export function storeFilePath(dir: string, id: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(id) || /^\.+$/.test(id)) {
+    throw new Error(
+      `unsafe session id ${JSON.stringify(id)}: use letters, digits, dot, dash or underscore`,
+    );
+  }
+  return join(dir, `${id}.json`);
+}
+
+/**
  * Sessions on disk, one JSON file each.
  *
  * ADR 0002 chose resumability and, in the same breath, accepted that the record
@@ -42,19 +63,8 @@ export class FileSessionStore implements SessionStore {
     return this.#dir;
   }
 
-  /**
-   * Session ids reach the filesystem, so they are a boundary. `/` and `\` are
-   * refused outright; a bare `.` or `..` is refused too, not because the
-   * `.json` suffix makes traversal work, but because nothing legitimate needs
-   * an id that looks like a directory hop.
-   */
   #path(sessionId: string): string {
-    if (!/^[A-Za-z0-9._-]+$/.test(sessionId) || /^\.+$/.test(sessionId)) {
-      throw new Error(
-        `unsafe session id ${JSON.stringify(sessionId)}: use letters, digits, dot, dash or underscore`,
-      );
-    }
-    return join(this.#dir, `${sessionId}.json`);
+    return storeFilePath(this.#dir, sessionId);
   }
 
   save(log: SessionLog): void {

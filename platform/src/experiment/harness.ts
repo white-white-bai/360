@@ -2,7 +2,7 @@ import type { AssertionList } from "../assertions/types.ts";
 import type { UnderstandingCheck } from "../checks/types.ts";
 import type { Expert } from "../experts/types.ts";
 import type { ModelProvider } from "../providers/types.ts";
-import type { ApparatusFeature } from "../session/apparatus.ts";
+import type { ApparatusFeature, ApparatusResult } from "../session/apparatus.ts";
 import { ALL_FEATURES, runApparatusSession } from "../session/apparatus.ts";
 import type { FollowUp } from "../session/measure.ts";
 import { MEANINGFUL_RETENTION_HOURS, measureFollowUp } from "../session/measure.ts";
@@ -25,6 +25,20 @@ import { ModelReplyUnusable, ReplyBudget } from "../session/retry.ts";
 export type Condition = "baseline" | "apparatus";
 
 /**
+ * Who sat the trial (ADR 0019).
+ *
+ * A script was WRITTEN TO CONTAIN A DIFFERENCE — that is what a fixture is — and a
+ * person was not. The two are different observations of the same treatment, so a trial
+ * that did not say which it was would be a trial nobody could average honestly, and
+ * `compare` refuses a mixed set rather than trusting a reader to notice.
+ *
+ * Which PROVIDER answered — a recorded script or a live model — is a different axis,
+ * already printed as the run's MODE. It is deliberately not folded in here: a person's
+ * trial is always live, and a simulation can be either.
+ */
+export type TrialSource = "person" | "simulation";
+
+/**
  * What each condition switches off.
  *
  * The baseline is ADR 0001's: one strong explainer, the same terminal check, and
@@ -40,6 +54,12 @@ export const CONDITION_ABLATIONS: Record<Condition, readonly ApparatusFeature[]>
 export interface TrialInput {
   expert: Expert;
   check: UnderstandingCheck;
+  /**
+   * Who is sitting this trial. Omitted means `"simulation"`, which is what every
+   * scripted caller is — a real sitting has to say so, and a default means a new
+   * caller cannot forget the field into existence (ADR 0019).
+   */
+  source?: TrialSource;
   /**
    * The shared stimulus, taught by both conditions.
    *
@@ -102,6 +122,11 @@ export interface TrialInput {
 
 export interface TrialResult {
   condition: Condition;
+  /**
+   * Who sat it. Always present, because a result that did not say would be unusable
+   * in the one place it matters — `compare`, which refuses to pool the two (ADR 0019).
+   */
+  source: TrialSource;
   disabled: readonly ApparatusFeature[];
   /**
    * True when the claims were injected rather than generated. It is false only on a
@@ -172,11 +197,55 @@ export interface FollowUpResult {
   meaningful: boolean;
 }
 
-function asFollowUpResult(followUp: FollowUp): FollowUpResult {
+/**
+ * The harness's own shape for a follow-up measurement, exported so the entry can
+ * record one without a second copy of the mapping (ADR 0019).
+ */
+export function followUpResult(followUp: FollowUp): FollowUpResult {
   return {
     passed: followUp.record.verdict === "pass",
     elapsedHours: followUp.record.elapsedHours,
     meaningful: followUp.meaningful,
+  };
+}
+
+/**
+ * A trial that could not be run at all.
+ *
+ * Extracted so the harness and the entry build it the same way (ADR 0019). The
+ * fields are not defaults a caller chose — they are the honest statement that a
+ * trial which never ran measured nothing: zero calls, zero cost, no verdict.
+ */
+export function incompleteTrial(
+  condition: Condition,
+  source: TrialSource,
+  list: AssertionList | undefined,
+  retries: number,
+  reason: string,
+  selfAssessment: number | null,
+): TrialResult {
+  return {
+    condition,
+    source,
+    disabled: CONDITION_ABLATIONS[condition],
+    listInjected: list !== undefined,
+    list,
+    completed: false,
+    incompleteReason: reason,
+    retries,
+    passed: false,
+    retaken: false,
+    retakeCheckId: null,
+    diagnosis: null,
+    probeConcerns: 0,
+    challengeFired: false,
+    calls: 0,
+    costUsd: 0,
+    costIsPlaceholder: false,
+    selfAssessment,
+    illusionGap: null,
+    retention: null,
+    transfer: null,
   };
 }
 
@@ -196,29 +265,67 @@ export async function runTrial(
     // kernel or a violated invariant still aborts the run, because turning those into
     // "incomplete" would hide a real fault behind a category that looks like bad luck.
     if (!(error instanceof ModelReplyUnusable)) throw error;
-    return {
+    return incompleteTrial(
       condition,
-      disabled: CONDITION_ABLATIONS[condition],
-      listInjected: input.list !== undefined,
-      list: input.list,
-      completed: false,
-      incompleteReason: error.message,
-      retries: budget.retries,
-      passed: false,
-      retaken: false,
-      retakeCheckId: null,
-      diagnosis: null,
-      probeConcerns: 0,
-      challengeFired: false,
-      calls: 0,
-      costUsd: 0,
-      costIsPlaceholder: false,
-      selfAssessment: input.selfAssessment ?? null,
-      illusionGap: null,
-      retention: null,
-      transfer: null,
-    };
+      input.source ?? "simulation",
+      input.list,
+      budget.retries,
+      error.message,
+      input.selfAssessment ?? null,
+    );
   }
+}
+
+/**
+ * Everything a completed trial carries that does not come from the session result —
+ * the two follow-up measurements and the self-assessment, computed before the result
+ * is assembled. Split out so `run-entry` can build a `TrialResult` in the harness's
+ * own shape instead of re-deriving the mapping (ADR 0019).
+ */
+export interface TrialResultParts {
+  passed: boolean;
+  retaken: boolean;
+  retakeCheckId: string | null;
+  diagnosis: string | null;
+  selfAssessment: number | null;
+  retention: FollowUpResult | null;
+  transfer: FollowUpResult | null;
+}
+
+/**
+ * A finished session result as a trial result. Exported for the entry (ADR 0019),
+ * which runs a person through the SAME apparatus and must record the same shape —
+ * a second copy of this mapping is a second place for the two to disagree.
+ */
+export function toTrialResult(
+  condition: Condition,
+  source: TrialSource,
+  result: ApparatusResult,
+  parts: TrialResultParts,
+): TrialResult {
+  return {
+    condition,
+    source,
+    disabled: result.disabled,
+    listInjected: result.listInjected,
+    list: result.list,
+    passed: parts.passed,
+    retaken: parts.retaken,
+    retakeCheckId: parts.retakeCheckId,
+    diagnosis: parts.diagnosis,
+    probeConcerns: result.outcomes.filter((outcome) => outcome.concern).length,
+    challengeFired: result.challenge.fired,
+    completed: true,
+    incompleteReason: null,
+    retries: result.retries,
+    calls: result.usage.calls,
+    costUsd: result.usage.costUsd,
+    costIsPlaceholder: !result.usage.priced,
+    selfAssessment: parts.selfAssessment,
+    illusionGap: parts.selfAssessment === null ? null : parts.selfAssessment - (parts.passed ? 1 : 0),
+    retention: parts.retention,
+    transfer: parts.transfer,
+  };
 }
 
 async function runCompletedTrial(
@@ -260,40 +367,26 @@ async function runCompletedTrial(
     // back and getting it wrong. Scoring silence as failure would make the rates
     // measure attendance.
     if (input.followUp.retentionAnswer !== undefined) {
-      retention = asFollowUpResult(
+      retention = followUpResult(
         measureFollowUp(result.log, input.check, "retention", input.followUp.retentionAnswer, now),
       );
     }
     if (input.transferCheck !== undefined && input.followUp.transferAnswer !== undefined) {
-      transfer = asFollowUpResult(
+      transfer = followUpResult(
         measureFollowUp(result.log, input.transferCheck, "transfer", input.followUp.transferAnswer, now),
       );
     }
   }
 
-  const selfAssessment = input.selfAssessment ?? null;
-  return {
-    condition,
-    disabled: result.disabled,
-    listInjected: result.listInjected,
-    list: result.list,
+  return toTrialResult(condition, input.source ?? "simulation", result, {
     passed,
     retaken: result.verdictAfterRetry !== null,
     retakeCheckId: result.verdictAfterRetry === null ? null : (input.retakeCheck ?? input.check).id,
     diagnosis: final?.diagnosis?.misconceptionId ?? null,
-    probeConcerns: result.outcomes.filter((outcome) => outcome.concern).length,
-    challengeFired: result.challenge.fired,
-    completed: true,
-    incompleteReason: null,
-    retries: result.retries,
-    calls: result.usage.calls,
-    costUsd: result.usage.costUsd,
-    costIsPlaceholder: !result.usage.priced,
-    selfAssessment,
-    illusionGap: selfAssessment === null ? null : selfAssessment - (passed ? 1 : 0),
+    selfAssessment: input.selfAssessment ?? null,
     retention,
     transfer,
-  };
+  });
 }
 
 export interface ConditionSummary {
@@ -458,7 +551,25 @@ function followUpCaveat(baseline: ConditionSummary, apparatus: ConditionSummary,
   return notes.length === 0 ? null : notes.join("; ");
 }
 
+/**
+ * The verdict for one source.
+ *
+ * A mixed set is REFUSED rather than averaged (ADR 0019). A script was written to contain
+ * a difference; a person was not. Pooling them lets the scripts carry a verdict that is
+ * then read as being about people, and no reader can uninvent that. So the report runs
+ * this once per source and prints a verdict for each — the rule ADR 0011 keeps between the
+ * two classrooms and ADR 0004 keeps between a claim and its verifier, applied to the sample.
+ */
 export function compare(trials: readonly TrialResult[], minTrialsPerCondition = 3): Comparison {
+  const sources = new Set(trials.map((trial) => trial.source));
+  if (sources.size > 1) {
+    throw new Error(
+      `cannot compare trials from more than one source (${[...sources].sort().join(" and ")}): a ` +
+        "person's trial and a simulated one are different observations, and averaging them would " +
+        "let a script carry a verdict about a person",
+    );
+  }
+
   const baseline = summarise("baseline", trials);
   const apparatus = summarise("apparatus", trials);
   const delta = apparatus.passRate - baseline.passRate;

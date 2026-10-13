@@ -21,6 +21,33 @@ export const EXPERIMENT_LIST = JSON.stringify({
   ],
 });
 
+/**
+ * The Domain the experiment teaches, and the three assets it pins (ADR 0019).
+ *
+ * A person's trial is stimulus-matched BY CONSTRUCTION: taught the same lesson the fixture
+ * was written for, and asked the same three questions. Both entries read these names so the
+ * simulated arm and a real sitting cannot drift onto different assets — the confound ADR
+ * 0001's injection exists to prevent, applied to who is sitting.
+ *
+ * The fixture is one Domain wide today. A second Domain needs its own list and its own
+ * checks, and that is a person's writing job, not a code one.
+ */
+export const EXPERIMENT_DOMAIN = "time-zones";
+
+export const EXPERIMENT_CHECKS = {
+  /** The terminal check both conditions ask. */
+  terminal: "C-gap",
+  /**
+   * The retake, asked after a failed check.
+   *
+   * Deliberately NOT the terminal check: re-asking a question the learner has just been
+   * shown the answer to measures recall of the question, not teaching.
+   */
+  retake: "C-overlap",
+  /** The transfer question — a situation the explanation never used. */
+  transfer: "T-fixed-offset",
+} as const;
+
 export const EXPERIMENT_VERDICTS = JSON.stringify({
   verdicts: [
     { id: "A1", ok: true, reason: "" },

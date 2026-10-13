@@ -195,3 +195,57 @@ test("the baseline does not retake, because it never re-teaches", async () => {
   assert.equal(result.retaken, false);
   assert.equal(result.passed, false);
 });
+
+test("a trial that does not say who sat it is a simulation, not a person", async () => {
+  // ADR 0019. The default is the safe side: every caller that predates a real sitting
+  // is a script, and a caller that means "person" has to say so rather than arrive at
+  // it by having forgotten a field.
+  const scripted = await trial("apparatus", 0);
+  assert.equal(scripted.source, "simulation");
+
+  const profile = PROFILES[0] as (typeof PROFILES)[number];
+  const declared = await runTrial("apparatus", new ScriptedProvider(apparatusTrialScript(profile)), {
+    expert,
+    check,
+    retakeCheck,
+    list,
+    source: "person",
+    probeAnswers: profile.probeAnswers,
+    terminalAnswer: profile.terminalAnswer,
+  });
+  assert.equal(declared.source, "person", "a declared source must survive to the result");
+});
+
+test("a person's trial and a script's are never pooled into one verdict", async () => {
+  // The reason the field exists. A fixture was WRITTEN to contain a difference and a
+  // person was not, so a set holding both is not a sample — and `compare` refuses it
+  // rather than letting a script carry a verdict about a person (ADR 0019).
+  const profile = PROFILES[0] as (typeof PROFILES)[number];
+  const person = await runTrial("apparatus", new ScriptedProvider(apparatusTrialScript(profile)), {
+    expert,
+    check,
+    retakeCheck,
+    list,
+    source: "person",
+    probeAnswers: profile.probeAnswers,
+    terminalAnswer: profile.terminalAnswer,
+  });
+  const scripted = await trial("apparatus", 0);
+  assert.throws(() => compare([person, scripted], 1), /more than one source/);
+});
+
+test("a person's trials, and only theirs, are compared together", async () => {
+  const profile = PROFILES[0] as (typeof PROFILES)[number];
+  const person = await runTrial("apparatus", new ScriptedProvider(apparatusTrialScript(profile)), {
+    expert,
+    check,
+    retakeCheck,
+    list,
+    source: "person",
+    probeAnswers: profile.probeAnswers,
+    terminalAnswer: profile.terminalAnswer,
+  });
+  const result = compare([person], 1);
+  assert.equal(result.apparatus.completed, 1);
+  assert.equal(result.baseline.completed, 0);
+});

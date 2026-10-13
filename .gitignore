@@ -8,6 +8,11 @@ platform/dist/
 # learner's misconceptions and their own words. Never commit these.
 platform/.sessions/
 
+# Real learners' experiment trials — SENSITIVE, and more so than a session: a
+# trial holds the learner's answers, their misconceptions, what they said they
+# thought they understood, AND the label they were filed under (ADR 0019).
+platform/.experiments/
+
 # Domain drafts and fetched sources — the builder's working material (ADR 0010).
 # A draft becomes a Domain by signature, not by being committed, and the fetched
 # third-party texts are review evidence rather than library content.

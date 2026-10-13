@@ -7,9 +7,17 @@ import { selectLiveProvider } from "../providers/live.ts";
 import { ScriptedProvider } from "../providers/scripted.ts";
 import type { ModelProvider } from "../providers/types.ts";
 import { loadRepoEnv } from "../util/local-env.ts";
-import { apparatusTrialScript, baselineTrialScript, EXPERIMENT_LIST, PROFILES } from "./fixtures-experiment.ts";
-import type { Condition, TrialResult } from "./harness.ts";
+import {
+  apparatusTrialScript,
+  baselineTrialScript,
+  EXPERIMENT_CHECKS,
+  EXPERIMENT_DOMAIN,
+  EXPERIMENT_LIST,
+  PROFILES,
+} from "./fixtures-experiment.ts";
+import type { Comparison, Condition, TrialResult } from "./harness.ts";
 import { compare, runTrial } from "./harness.ts";
+import { ExperimentStore } from "./records.ts";
 
 const CONDITIONS: readonly Condition[] = ["baseline", "apparatus"];
 
@@ -17,7 +25,7 @@ function pad(text: string, width: number): string {
   // Chinese glyphs are two columns wide in a terminal; counting code points makes
   // the table ragged, which is the one thing a table must not be.
   let columns = 0;
-  for (const character of text) columns += /[\u3000-\u9fff\uff00-\uffef]/.test(character) ? 2 : 1;
+  for (const character of text) columns += /[　-鿿＀-￯]/.test(character) ? 2 : 1;
   return text + " ".repeat(Math.max(0, width - columns));
 }
 
@@ -35,6 +43,71 @@ const usd = (value: number): string => `$${value.toFixed(4)}`;
  */
 const TICK_MS = 4000;
 
+interface PanelRow {
+  learner: string;
+  trial: TrialResult;
+}
+
+/**
+ * One source's report — its trials, its conditions, and ITS OWN verdict.
+ *
+ * The two sources are never pooled (ADR 0019), so this is called once per source rather
+ * than once over everything. A single verdict over both would be the experiment averaging
+ * a script against a person, which is the exact thing the source field exists to forbid.
+ */
+function printPanel(options: {
+  title: string;
+  rows: readonly PanelRow[];
+  /** The terminal check's id, naming the asset that decided a first-attempt verdict. */
+  checkId: string;
+  /** How many COMPLETED trials a condition needs before the verdict is anything but inconclusive. */
+  minTrials: number;
+  money: (value: number) => string;
+}): Comparison {
+  const { title, rows, checkId, minTrials, money } = options;
+
+  console.log(`\nPER TRIAL — ${title}`);
+  console.log(
+    `  ${pad("condition", 12)}${pad("learner", 26)}${pad("result", 9)}${pad("decided by", 13)}${right("concerns", 9)}${right("calls", 7)}${right("cost", 10)}`,
+  );
+  for (const { learner, trial } of rows) {
+    // The asset that produced the verdict: the first question, or the retake's. They
+    // are different claims about the learner and must not look the same.
+    const decidedBy = trial.completed ? (trial.retakeCheckId ?? checkId) : "—";
+    console.log(
+      `  ${pad(trial.condition, 12)}${pad(learner, 26)}${pad(trial.completed ? (trial.passed ? "pass" : "FAIL") : "INCOMPLETE", 9)}${pad(decidedBy, 13)}${right(String(trial.probeConcerns), 9)}${right(String(trial.calls), 7)}${right(money(trial.costUsd), 10)}`,
+    );
+    if (!trial.completed) {
+      // The reason gets its own line and is not truncated. An incomplete trial is the one row
+      // a reader has to act on, and "why" is the whole of what it has to say.
+      console.log(`      ↳ could not be run: ${trial.incompleteReason ?? "unknown"}`);
+    }
+  }
+
+  const comparison = compare(rows.map((row) => row.trial), minTrials);
+  console.log(`\nPER CONDITION — ${title}`);
+  console.log(
+    `  ${pad("condition", 12)}${right("ran", 6)}${right("incompl", 9)}${right("passed", 8)}${right("rate", 8)}${right("retries", 9)}${right("retention", 11)}${right("transfer", 10)}${right("mean calls", 12)}${right("mean cost", 12)}${right("illusion", 10)}`,
+  );
+  // "no data" rather than 0%: a learner who never came back is not a learner who failed.
+  const pct = (value: number | null): string => (value === null ? "no data" : `${(value * 100).toFixed(0)}%`);
+  for (const summary of [comparison.baseline, comparison.apparatus]) {
+    console.log(
+      `  ${pad(summary.condition, 12)}${right(String(summary.completed), 6)}${right(String(summary.incomplete), 9)}${right(String(summary.passed), 8)}${right(`${(summary.passRate * 100).toFixed(0)}%`, 8)}${right(String(summary.retries), 9)}${right(pct(summary.retentionRate), 11)}${right(pct(summary.transferRate), 10)}${right(summary.meanCalls.toFixed(1), 12)}${right(money(summary.meanCostUsd), 12)}${right(summary.meanIllusionGap === null ? "n/a" : summary.meanIllusionGap.toFixed(2), 10)}`,
+    );
+  }
+  console.log(
+    `  ${pad("challenges", 12)}${right(`baseline ${comparison.baseline.challenges}`, 24)}${right(`apparatus ${comparison.apparatus.challenges}`, 24)}`,
+  );
+
+  console.log(`\nVERDICT (${title})  ${comparison.verdict.toUpperCase()}`);
+  console.log(`  ${comparison.reason}`);
+  if (comparison.caveat !== null) {
+    console.log(`\n  READ THIS TOO — ${comparison.caveat}`);
+  }
+  return comparison;
+}
+
 async function main(): Promise<void> {
   // The repo's local .env first: a key that lives there is found before anything asks for one.
   loadRepoEnv();
@@ -42,16 +115,16 @@ async function main(): Promise<void> {
   const liveSelection = live ? selectLiveProvider() : null;
 
   const library = loadLibrary();
-  const expert = composeExpert(library, "patient-explainer", "analogy-heavy", "time-zones");
-  const check = findCheck(expert.domain.checks, "C-gap");
+  const expert = composeExpert(library, "patient-explainer", "analogy-heavy", EXPERIMENT_DOMAIN);
+  const check = findCheck(expert.domain.checks, EXPERIMENT_CHECKS.terminal);
   // A DIFFERENT asset for the second sitting. Re-asking the question the learner just
   // failed measures recall of that question, which would flatter the apparatus for a
   // reason that has nothing to do with understanding.
-  const retakeCheck = findCheck(expert.domain.checks, "C-overlap");
+  const retakeCheck = findCheck(expert.domain.checks, EXPERIMENT_CHECKS.retake);
   // A question the explanation never used: can they apply the same claim somewhere new.
   // Asking one they were just taught the answer to measures recall, and recall is not
   // transfer.
-  const transferCheck = findCheck(expert.domain.checks, "T-fixed-offset");
+  const transferCheck = findCheck(expert.domain.checks, EXPERIMENT_CHECKS.transfer);
 
   console.log("Ablation experiment (ADR 0001)");
   console.log(`  expert   ${describeExpert(expert)}`);
@@ -59,8 +132,11 @@ async function main(): Promise<void> {
   console.log(`  retake   ${retakeCheck.id} — a DIFFERENT situation, so a pass after remediation`);
   console.log("           cannot be recall of the question that was just failed");
   console.log(`  transfer ${transferCheck.id} — a situation the lesson never used, asked a day later`);
-  console.log(`  learners ${PROFILES.map((profile) => profile.name).join(", ")}`);
+  console.log(`  learners ${PROFILES.map((profile) => profile.name).join(", ")} — simulated`);
   console.log("  baseline = the apparatus with semanticVerify, probes and challenger switched off");
+  // ADR 0019: a person's sitting is a different observation and gets its own panel below,
+  // never averaged with a script's.
+  console.log("  real learners, if any have sat one, are reported separately and never pooled with these");
 
   if (live) {
     if (liveSelection === null) {
@@ -78,11 +154,11 @@ async function main(): Promise<void> {
 
   /** In a live run the first trial produces the stimulus; every later one is given it. */
   let stimulus: AssertionList | undefined;
-  if (!live) stimulus = parseAssertionList(EXPERIMENT_LIST, "time-zones");
+  if (!live) stimulus = parseAssertionList(EXPERIMENT_LIST, EXPERIMENT_DOMAIN);
 
   const trials: TrialResult[] = [];
   /** Kept alongside the results so a row can name the learner it belongs to. */
-  const rows: Array<{ learner: string; trial: TrialResult }> = [];
+  const rows: PanelRow[] = [];
   const total = PROFILES.length * CONDITIONS.length;
   let index = 0;
 
@@ -142,47 +218,47 @@ async function main(): Promise<void> {
     }
   }
 
+  // A person's trials, read off disk. The store is a read here and creates nothing.
+  const realRows: PanelRow[] = new ExperimentStore()
+    .list()
+    .map((record) => ({ learner: record.learner, trial: record.trial }));
+
   // A dollar figure computed from a fallback rate is not a measurement. Marking it where
-  // it is printed is the only reason the flag exists.
-  const placeholderPrices = trials.some((trial) => trial.costIsPlaceholder);
+  // it is printed is the only reason the flag exists. Both panels are checked, because a
+  // real sitting pays the same placeholder rate a simulated one does.
+  const placeholderPrices = [...trials, ...realRows.map((row) => row.trial)].some(
+    (trial) => trial.costIsPlaceholder,
+  );
   const money = (value: number): string => (placeholderPrices ? `≈${usd(value)}` : usd(value));
 
-  console.log("\nPER TRIAL");
-  console.log(
-    `  ${pad("condition", 12)}${pad("learner", 26)}${pad("result", 9)}${pad("decided by", 13)}${right("concerns", 9)}${right("calls", 7)}${right("cost", 10)}`,
-  );
-  for (const { learner, trial } of rows) {
-    // The asset that produced the verdict: the first question, or the retake's. They
-    // are different claims about the learner and must not look the same.
-    const decidedBy = trial.completed ? (trial.retakeCheckId ?? check.id) : "—";
-    console.log(
-      `  ${pad(trial.condition, 12)}${pad(learner, 26)}${pad(trial.completed ? (trial.passed ? "pass" : "FAIL") : "INCOMPLETE", 9)}${pad(decidedBy, 13)}${right(String(trial.probeConcerns), 9)}${right(String(trial.calls), 7)}${right(money(trial.costUsd), 10)}`,
-    );
-    if (!trial.completed) {
-      // The reason gets its own line and is not truncated. An incomplete trial is the one row
-      // a reader has to act on, and "why" is the whole of what it has to say.
-      console.log(`      ↳ could not be run: ${trial.incompleteReason ?? "unknown"}`);
-    }
+  const simulated = printPanel({
+    title: "SIMULATED LEARNERS",
+    rows,
+    checkId: check.id,
+    minTrials: PROFILES.length,
+    money,
+  });
+
+  // The honest empty state, and it is not a footnote: until a person sits one, the platform
+  // has measured the apparatus and said nothing about anybody. A simulated learner cannot
+  // stand in (ADR 0019), so there is nothing to print but the instructions.
+  console.log("\nPER TRIAL — REAL LEARNERS");
+  if (realRows.length === 0) {
+    console.log("  No person has sat a trial yet. A simulated learner cannot stand in for one, and the");
+    console.log("  two are never averaged (ADR 0019) — so this panel stays empty until somebody runs");
+    console.log("  `npm run enter -- --baseline` or `npm run enter -- --apparatus`.");
+  } else {
+    printPanel({
+      title: "REAL LEARNERS",
+      rows: realRows,
+      checkId: check.id,
+      // A person's three trials is still a sample of three. The default threshold is the
+      // honest one here, not a number tuned to make a small sample look decisive.
+      minTrials: 3,
+      money,
+    });
   }
 
-  const comparison = compare(trials, PROFILES.length);
-  console.log("\nPER CONDITION");
-  console.log(`  ${pad("condition", 12)}${right("ran", 6)}${right("incompl", 9)}${right("passed", 8)}${right("rate", 8)}${right("retries", 9)}${right("retention", 11)}${right("transfer", 10)}${right("mean calls", 12)}${right("mean cost", 12)}${right("illusion", 10)}`);
-  // "no data" rather than 0%: a learner who never came back is not a learner who failed.
-  const pct = (value: number | null): string => (value === null ? "no data" : `${(value * 100).toFixed(0)}%`);
-  for (const summary of [comparison.baseline, comparison.apparatus]) {
-    console.log(
-      `  ${pad(summary.condition, 12)}${right(String(summary.completed), 6)}${right(String(summary.incomplete), 9)}${right(String(summary.passed), 8)}${right(`${(summary.passRate * 100).toFixed(0)}%`, 8)}${right(String(summary.retries), 9)}${right(pct(summary.retentionRate), 11)}${right(pct(summary.transferRate), 10)}${right(summary.meanCalls.toFixed(1), 12)}${right(money(summary.meanCostUsd), 12)}${right(summary.meanIllusionGap === null ? "n/a" : summary.meanIllusionGap.toFixed(2), 10)}`,
-    );
-  }
-  console.log(`  ${pad("challenges", 12)}${right(`baseline ${comparison.baseline.challenges}`, 24)}${right(`apparatus ${comparison.apparatus.challenges}`, 24)}`);
-
-  console.log(`\nVERDICT  ${comparison.verdict.toUpperCase()}`);
-  console.log(`  ${comparison.reason}`);
-
-  if (comparison.caveat !== null) {
-    console.log(`\n  READ THIS TOO — ${comparison.caveat}`);
-  }
   if (placeholderPrices) {
     console.log(
       "\n  The costs above are PLACEHOLDER prices. This model is not in the price table, so the dollars" +
@@ -190,11 +266,12 @@ async function main(): Promise<void> {
         "\n  and ATP_PRICE_OUT to the real numbers before quoting any of them.",
     );
   }
-  const followUpHours = comparison.apparatus.meanFollowUpHours;
+  const followUpHours = simulated.apparatus.meanFollowUpHours;
   if (followUpHours !== null) {
     console.log(
-      `\n  The follow-up clock was SIMULATED (${followUpHours.toFixed(0)}h). The measurement is wired up; the` +
-        "\n  waiting is not. Re-measure for real before believing any retention number here.",
+      `\n  The simulated follow-up clock was MOVED, not waited on (${followUpHours.toFixed(0)}h). The measurement` +
+        "\n  is wired up; the waiting is not. Re-measure for real before believing any retention number here." +
+        "\n  (Real learners' retention is measured over their own elapsed time, and is not affected by this.)",
     );
   }
 
