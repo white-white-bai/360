@@ -1,0 +1,34 @@
+# The learner is real, and the record says so
+
+## The gap
+
+ADR 0001 accepted v1 by comparing one set of claims under two conditions, and its harness does that — but on **scripted learners**. `PROFILES` in `fixtures-experiment.ts` is a handful of hard-coded characters (`probeAnswers`, `terminalAnswer`, `selfAssessment`), and `runTrial` feeds them to the session the way a machine feeds a fixture. The experiment therefore measures the **apparatus**, faithfully, and says nothing about a person. That was the right first thing to build: a harness whose learner is also under construction cannot be debugged.
+
+`npm run enter` is the other half, and it already exists. It asks a person a probe, a terminal check and a retake, keeps the session on disk, and `--followup` measures retention and transfer over real elapsed time — the only place in the platform where a day is a day. What it cannot do is the two things the experiment needs: run in the **baseline** condition, and leave a result the experiment can read. `runApparatusSession` has accepted `disable` since the experiment was built; `run-entry.ts` simply never passes it. A person who sits through a lesson is a lesson, not a trial.
+
+The distance is not a missing instrument. It is that nothing records **who the learner was**, and until that is recorded, folding a person's sitting into `compare()` alongside a script's would be the experiment lying about its own sample.
+
+## The decisions
+
+**1. A trial carries its source, and there is no source-less trial.** `TrialResult` gains `source: "person" | "simulation"`, set from `TrialInput.source` and defaulting to `"simulation"`. The field is not documentation — it is the thing `compare()` reads to refuse a mixed set, and a default means a new caller cannot forget it into existence. Which provider answered (a scripted fixture or a live model) is a **different axis**, already printed as the run's MODE, and is deliberately not folded in here.
+
+**2. The two sources are never pooled, and the kernel says so.** `compare()` throws when it is handed trials from more than one source. This is the same rule ADR 0011 keeps between the two classrooms and ADR 0004 keeps between a claim and its verifier, applied to the sample: a script was **written to contain a difference** — that is what a fixture is — and a person was not. Averaging them lets the scripts carry a verdict that is then read as being about people, and no reader can uninvent that. The report runs `compare()` once per source and prints a verdict for each.
+
+**3. A person's trial is stimulus-matched by construction.** ADR 0001's central decision is that the claims are injected, because two conditions that generated their own lists could differ for a reason that has nothing to do with the apparatus. A person's sitting gets the same treatment: experiment mode injects the experiment's fixed list and pins the same three assets (`C-gap`, `C-overlap`, `T-fixed-offset`) the harness pins. If the chosen Domain is not the one the fixture was written for, the entry **refuses**, exactly as `--demo` refuses — teaching a person a different lesson and filing it as the same trial is the confound this rule exists to prevent. The fixture is one Domain wide today; a second Domain needs its own list, and that is a person's writing job, not a code one.
+
+**4. Recording is opt-in by the condition flag, and the follow-up completes the record.** A person gives either `--baseline` or `--apparatus`; that flag is the whole of the opt-in. A plain `npm run enter` is a lesson and leaves no trial, because the platform teaching somebody and somebody **running the experiment** are different acts and the second one is deliberate. The lesson writes the record; the second sitting (`--followup <id>`) fills in retention and transfer, because those are measured over real elapsed time in a later process and a record that could not be completed across a process boundary would be a record that could not hold the measure ADR 0001 cares most about.
+
+**5. The record lives beside the sessions, under the same rule.** Real-learner trials are written to `platform/.experiments/`, gitignored like `platform/.sessions/` and for the same reason (ADR 0002): a result holds the learner's words and their misconceptions. It is keyed by session id, so the follow-up finds it, and it carries the learner's label and the date the trial was recorded — the two facts a row needs in order to name itself in a report. The id boundary is the one the session store already enforces, reused rather than re-implemented, because a second copy of a security check is a second place for it to be wrong.
+
+**6. What this does not decide.** It does not run the experiment: the lessons cost real money and a person's hours, and this ADR wires the sitting, it does not take it. It does not touch the simulated arm — same profiles, same fixtures, same illustrative numbers. It does not change `summarise`'s arithmetic or `compare`'s verdicts, only what `compare` will accept. And it does not make a person's three trials into evidence: with fewer than `minTrialsPerCondition` completed trials in a condition the verdict is still `inconclusive`, and that is the honest reading of a sample of three, not a defect to be tuned away.
+
+## Consequences
+
+- `TrialSource` and `TrialResult.source` in `src/experiment/harness.ts`; `TrialInput.source` is optional and defaults to `"simulation"`. `incompleteTrial(...)` and `toTrialResult(...)` are extracted so the harness and the entry build a result the same way, and `followUpResult` is exported so the entry can record a measurement in the harness's own shape.
+- `compare()` refuses a mixed-source set with a message naming both sources. Existing callers pass one source and are unaffected.
+- New module `src/experiment/records.ts` — `RecordedTrial`, `ExperimentStore` (`save` / `load` / `revise`) over `EXPERIMENTS_DIR`. `storeFilePath` moves out of `FileSessionStore` into `src/session/store.ts` as an exported function and both stores use it.
+- `run-entry.ts` gains `--baseline` / `--apparatus` (condition, and the opt-in to recording) and `--learner <name>`; in experiment mode it pins the three assets, injects the fixture list, asks for a self-assessment after the verdict, and writes the record. `--followup` completes it. `fixtures-experiment.ts` gains `EXPERIMENT_DOMAIN` and `EXPERIMENT_CHECKS`, used by both entries so the assets cannot drift.
+- `run-experiment.ts` prints a second panel per source — `SIMULATED LEARNERS` and `REAL LEARNERS` — each with its own `compare()` verdict, and an honest empty state when no person has sat one yet.
+- `catalog.ts` gains `EXPERIMENTS_DIR`; `.gitignore` gains `platform/.experiments/`.
+
+*Consolidates: a-trial-carries-its-source; the-two-sources-are-never-pooled; a-persons-trial-is-stimulus-matched.*
