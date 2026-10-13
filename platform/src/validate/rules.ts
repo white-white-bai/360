@@ -57,6 +57,30 @@ function safely<T>(what: string, load: () => T): { value?: T; problem?: Finding 
   }
 }
 
+/**
+ * Does this passage source name a document a reader could go and open?
+ *
+ * The passage-provenance rule asks only this — it does not check the source against the
+ * manifest, for either entrance. A URL qualifies; so does a bare standard id whose number
+ * is its own citation (`RFC 3339`); so does a `local:` identifier, which names a document
+ * a reader can have, one the manifest keys on and hashes (ADR 0016). ADR 0021: the
+ * platform's own vocabulary is citable by its own name, and without this case every
+ * passage of a legitimately provided Domain warned — a validator teaching its readers to
+ * stop reading warnings.
+ *
+ * The predicate comes from the build layer, which this file already imports for the
+ * manifest rule, rather than a second spelling of `local:` here — a second copy of the
+ * vocabulary is a second place for the two entrances to disagree about what a provided
+ * source is called.
+ */
+function namesADocument(source: string): boolean {
+  return (
+    /https?:\/\//.test(source) ||
+    /\b(RFC|ISO|IEEE|ITU|IANA)\b/.test(source) ||
+    source.split(/\s+/).some(isLocalSource)
+  );
+}
+
 function markdownFiles(dir: string): string[] {
   return readdirSync(dir)
     .filter((name) => name.endsWith(".md"))
@@ -197,9 +221,7 @@ function validateCorpus(domain: Domain, dir: string): Finding[] {
       );
       continue;
     }
-    const looksCitable =
-      /https?:\/\//.test(passage.source) || /\b(RFC|ISO|IEEE|ITU|IANA)\b/.test(passage.source);
-    if (!looksCitable) {
+    if (!namesADocument(passage.source)) {
       findings.push(
         finding(
           "warning",

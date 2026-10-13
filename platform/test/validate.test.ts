@@ -209,6 +209,43 @@ test("a source that names no document is a warning, not an error", (t) => {
   assert.equal(result.errors, 0, "a vague source is a judgement call, so it must not block");
 });
 
+test("a passage citing a provided source is citable by its own name", (t) => {
+  // ADR 0021: `local:<file>` is a document identifier, on the same footing as a URL.
+  // Without this case the rule warned on EVERY passage of a Domain built through the
+  // second entrance (ADR 0016) — which is how a validator teaches its readers to stop
+  // reading warnings. The integrity of that file is the manifest rule's business, not
+  // this one's; this rule only asks whether the string names anything at all.
+  const root = tmpRoot(t);
+  writeDomain(root, {
+    corpus: [
+      "## P-one",
+      "",
+      "source: 建筑设计防火规范 GB 50016 — local:GB-50016.txt",
+      "",
+      "An offset is signed, and wall-clock readings are stated relative to UTC.",
+    ].join("\n"),
+  });
+  const result = run(root);
+  assert.ok(!result.codes.includes("corpus.provenance-vague"), `got: ${result.codes.join(", ")}`);
+  assert.equal(result.errors, 0);
+});
+
+test("a bare title with no id still warns, tokenisation and all", (t) => {
+  // The `local:` case is added by splitting the source on whitespace and testing each
+  // token, so this pins that the split does not let a plain multi-word title through.
+  const root = tmpRoot(t);
+  writeDomain(root, {
+    corpus: [
+      "## P-one",
+      "",
+      "source: 建筑设计防火规范 2014年版",
+      "",
+      "An offset is signed, and wall-clock readings are stated relative to UTC.",
+    ].join("\n"),
+  });
+  assert.ok(run(root).codes.includes("corpus.provenance-vague"));
+});
+
 test("hyphens are typography: `wall clock` matches `wall-clock`", (t) => {
   const root = tmpRoot(t);
   writeDomain(root);
