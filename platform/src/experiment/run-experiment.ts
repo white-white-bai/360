@@ -218,10 +218,15 @@ async function main(): Promise<void> {
     }
   }
 
-  // A person's trials, read off disk. The store is a read here and creates nothing.
-  const realRows: PanelRow[] = new ExperimentStore()
-    .list()
-    .map((record) => ({ learner: record.learner, trial: record.trial }));
+  // A person's trials, read off disk. The store is a read here and creates nothing. It is
+  // read through `scan` rather than `list` because the report has to be able to SAY that a
+  // file could not be read (ADR 0020): a record that is quietly absent from this panel reads
+  // as a sitting that never happened, and a person's hour is worth more than that.
+  const realScan = new ExperimentStore().scan();
+  const realRows: PanelRow[] = realScan.records.map((record) => ({
+    learner: record.learner,
+    trial: record.trial,
+  }));
 
   // A dollar figure computed from a fallback rate is not a measurement. Marking it where
   // it is printed is the only reason the flag exists. Both panels are checked, because a
@@ -243,10 +248,29 @@ async function main(): Promise<void> {
   // has measured the apparatus and said nothing about anybody. A simulated learner cannot
   // stand in (ADR 0019), so there is nothing to print but the instructions.
   console.log("\nPER TRIAL — REAL LEARNERS");
+  // ADR 0020: a file the store could not read is NAMED and shown, never quietly dropped. It
+  // is printed here rather than after the panel because a person's sitting that vanishes from
+  // the numbers without a mark is the one outcome this report must not produce — and a reader
+  // who meets the count first has to meet the caveat with it.
+  if (realScan.unreadable.length > 0) {
+    console.log(`  ${realScan.unreadable.length} file(s) on the shelf could not be read and are NOT counted below:`);
+    for (const entry of realScan.unreadable) {
+      console.log(`  ⚠ ${entry.file} — ${entry.reason}`);
+    }
+  }
   if (realRows.length === 0) {
-    console.log("  No person has sat a trial yet. A simulated learner cannot stand in for one, and the");
-    console.log("  two are never averaged (ADR 0019) — so this panel stays empty until somebody runs");
-    console.log("  `npm run enter -- --baseline` or `npm run enter -- --apparatus`.");
+    if (realScan.unreadable.length > 0) {
+      // "Nobody has sat one" would be a claim this panel cannot make: a person may well have sat
+      // one, and the files named above are the only reason it is not in the count. Saying it
+      // anyway is exactly the silent absence ADR 0020 exists to prevent.
+      console.log("  No record here could be read, so this panel says nothing about anybody. A person may");
+      console.log("  have sat a trial — the files named above are why it is not counted. Repair or remove");
+      console.log("  them, then re-run.");
+    } else {
+      console.log("  No person has sat a trial yet. A simulated learner cannot stand in for one, and the");
+      console.log("  two are never averaged (ADR 0019) — so this panel stays empty until somebody runs");
+      console.log("  `npm run enter -- --baseline` or `npm run enter -- --apparatus`.");
+    }
   } else {
     printPanel({
       title: "REAL LEARNERS",

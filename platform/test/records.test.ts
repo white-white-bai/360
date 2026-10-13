@@ -128,3 +128,48 @@ test("loading a trial that was never recorded is an error, not an empty record",
   assert.throws(() => store.load("ghost"), /no recorded trial/);
   assert.equal(store.has("ghost"), false);
 });
+
+test("one unreadable file is named and skipped, not fatal to the whole shelf", (t) => {
+  // ADR 0020: reading a directory is not reading a record. A scan that threw would let one
+  // bad file destroy a report produced after every trial had already been run and paid for.
+  // The good record is still returned; the bad one is named, not dropped.
+  const dir = freshDir(t);
+  const store = new ExperimentStore(dir);
+  store.save(record("lesson-1"));
+
+  // A truncated write: valid prefix, no closing brace. This is what a killed `writeFileSync`
+  // used to leave, and it is the most common corruption a shelf sees.
+  writeFileSync(join(dir, "broken.json"), '{"sessionId": "broken", "learner": "bob",', "utf8");
+
+  const scan = store.scan();
+  assert.deepEqual(scan.records.map((saved) => saved.sessionId), ["lesson-1"]);
+  assert.equal(scan.unreadable.length, 1);
+  assert.equal(scan.unreadable[0]?.file, "broken.json");
+  // The reason describes the problem and does NOT repeat the path: `file` already carries the
+  // name, so a caller prints `${file} — ${reason}` and the path does not appear twice.
+  assert.match(scan.unreadable[0]?.reason ?? "", /^not JSON \(\d+ bytes\)$/);
+  assert.doesNotMatch(scan.unreadable[0]?.reason ?? "", /broken\.json/);
+  // `list` returns the readable shelf, and a caller that NAMED the broken record still hears
+  // about it — the strictness moved, it did not disappear.
+  assert.deepEqual(store.list().map((saved) => saved.sessionId), ["lesson-1"]);
+  assert.throws(() => store.load("broken"), /not JSON/);
+});
+
+test("a crashed write leaves debris the scan ignores, never a half record", (t) => {
+  // `save` writes beside the target and renames into place (ADR 0020), and the temporary name
+  // deliberately does not end in `.json`. A process killed mid-write therefore leaves a `.tmp`
+  // file that is not a sitting: it is neither listed nor reported as unreadable.
+  const dir = freshDir(t);
+  const store = new ExperimentStore(dir);
+
+  // Exactly what a killed save would leave behind.
+  writeFileSync(join(dir, "lesson-1.json.tmp"), '{"sessionId": "lesson-1", "lear', "utf8");
+  const scan = store.scan();
+  assert.deepEqual(scan.records, []);
+  assert.deepEqual(scan.unreadable, []);
+
+  // And a save over it lands whole, clearing its own temporary rather than adding to the debris.
+  store.save(record("lesson-1"));
+  assert.equal(existsSync(join(dir, "lesson-1.json.tmp")), false);
+  assert.equal(store.load("lesson-1").sessionId, "lesson-1");
+});

@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { EXPERIMENTS_DIR } from "../catalog.ts";
 import { storeFilePath } from "../session/store.ts";
@@ -27,6 +28,19 @@ export interface RecordedTrial {
   recordedAt: string;
   domainId: string;
   trial: TrialResult;
+}
+
+/** A file on the shelf that is not a recorded trial, and why (ADR 0020). */
+export interface UnreadableRecord {
+  /** The file's NAME, not its path: the reason below already carries the path. */
+  file: string;
+  reason: string;
+}
+
+/** What a directory read found: the trials, and the files that were not trials. */
+export interface StoreScan {
+  records: RecordedTrial[];
+  unreadable: UnreadableRecord[];
 }
 
 function assertSource(value: unknown, where: string): asserts value is TrialSource {
@@ -99,7 +113,14 @@ export class ExperimentStore {
       );
     }
     mkdirSync(this.#dir, { recursive: true });
-    writeFileSync(this.#path(record.sessionId), JSON.stringify(record, null, 2), "utf8");
+    // Write beside the target and rename into place (ADR 0020). A rename within one
+    // directory is atomic, so a process killed mid-write leaves either the old record or
+    // the new one and never half of either — and the temporary name deliberately does NOT
+    // end in `.json`, so a crashed write is debris the scan ignores rather than an
+    // unreadable record that would then have to be explained. A record that exists is whole.
+    const path = this.#path(record.sessionId);
+    writeFileSync(`${path}.tmp`, JSON.stringify(record, null, 2), "utf8");
+    renameSync(`${path}.tmp`, path);
   }
 
   has(sessionId: string): boolean {
@@ -111,7 +132,16 @@ export class ExperimentStore {
     if (!existsSync(path)) {
       throw new Error(`no recorded trial \`${sessionId}\` in ${this.#dir}`);
     }
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    const text = readFileSync(path, "utf8");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // Node's own message is a bare `Unexpected end of JSON input`, which does not say
+      // which file it was — and which file it was is the one thing a reader of the
+      // unreadable list needs (ADR 0020).
+      throw new Error(`${path}: not JSON (${text.length} bytes)`);
+    }
     assertRecordedTrial(parsed, path);
     return parsed;
   }
@@ -129,16 +159,55 @@ export class ExperimentStore {
     return revised;
   }
 
-  /** Records in the order they were taken. Missing directory is an empty store, not an error. */
-  list(): RecordedTrial[] {
-    if (!existsSync(this.#dir)) return [];
-    const records = readdirSync(this.#dir)
-      .filter((name) => name.endsWith(".json"))
-      .map((name) => this.load(name.slice(0, -".json".length)));
-    return records.sort((a, b) =>
+  /**
+   * Read the shelf: every trial it holds, and every file that is not one.
+   *
+   * Reading a directory is not reading a record, and the difference is the whole of
+   * ADR 0020. `load` throws on a bad record because a caller that NAMED one has to hear
+   * about it; a scan that did the same would let one bad file destroy the report, and the
+   * report is produced after every trial has already run and been paid for. So a file that
+   * will not load is NAMED and skipped, and the rest of the shelf is returned.
+   *
+   * The skip is not silent. A caller is expected to show `unreadable` wherever it shows the
+   * records — a trial that quietly vanishes reads as a sitting that never happened, which is
+   * the one thing this report must never say.
+   */
+  scan(): StoreScan {
+    if (!existsSync(this.#dir)) return { records: [], unreadable: [] };
+    const records: RecordedTrial[] = [];
+    const unreadable: UnreadableRecord[] = [];
+    for (const name of readdirSync(this.#dir)) {
+      if (!name.endsWith(".json")) continue;
+      try {
+        records.push(this.load(name.slice(0, -".json".length)));
+      } catch (error) {
+        // The reason is the error's own message with the leading path removed, because the
+        // file name is reported in its own field next to it and the two together were
+        // printing the same path twice. `load`'s message keeps the path: a caller that named
+        // one record sees the throw, not this list.
+        const path = join(this.#dir, name);
+        const message = error instanceof Error ? error.message : String(error);
+        unreadable.push({
+          file: name,
+          reason: message.startsWith(`${path}: `) ? message.slice(path.length + 2) : message,
+        });
+      }
+    }
+    records.sort((a, b) =>
       a.recordedAt === b.recordedAt
         ? a.sessionId.localeCompare(b.sessionId)
         : a.recordedAt.localeCompare(b.recordedAt),
     );
+    return { records, unreadable };
+  }
+
+  /**
+   * Records in the order they were taken. Missing directory is an empty store, not an error.
+   *
+   * The readable shelf only — the same call it has always been. A caller that must also see
+   * what could not be read asks `scan` (ADR 0020); this is for the ones that only want rows.
+   */
+  list(): RecordedTrial[] {
+    return this.scan().records;
   }
 }
